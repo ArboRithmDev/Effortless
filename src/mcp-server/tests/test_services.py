@@ -247,9 +247,12 @@ def test_deploy_to_mcp_clients(monkeypatch):
             
         monkeypatch.setattr("os.path.expanduser", mock_expanduser)
         
-        # Créer le répertoire .gemini/config et .claude factices pour forcer la détection
+        # Créer le répertoire .gemini/config, .claude, .codex, .vibe, et .copilot factices
         os.makedirs(os.path.join(tmpdir, ".gemini", "config"))
         os.makedirs(os.path.join(tmpdir, ".claude"))
+        os.makedirs(os.path.join(tmpdir, ".codex"))
+        os.makedirs(os.path.join(tmpdir, ".vibe"))
+        os.makedirs(os.path.join(tmpdir, ".copilot"))
         
         # Créer un fichier de skill source factice dans le projet temporaire
         source_skill_dir = os.path.join(tmpdir, "skills", "effortless")
@@ -261,9 +264,13 @@ def test_deploy_to_mcp_clients(monkeypatch):
         results = deploy_to_mcp_clients(tmpdir)
         
         assert len(results) > 0
-        # Vérifier que les fichiers ont été copiés/écrits
+        # Vérifier que les fichiers ont été copiés/écrits sur tous les clients détectés
         assert any(r["name"] == "Antigravity CLI" and r["status"] == "success" for r in results)
         assert any(r["name"] == "Claude Code" and r["status"] == "success" for r in results)
+        assert any(r["name"] == "Codex" and r["status"] == "success" for r in results)
+        assert any(r["name"] == "Mistral Vibe" and r["status"] == "success" for r in results)
+        assert any(r["name"] == "GitHub Copilot" and r["status"] == "success" for r in results)
+
 
 def test_repo_analyzer_and_migration_planner(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
