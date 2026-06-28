@@ -427,13 +427,13 @@ def test_autonomous_loop_lifecycle(monkeypatch):
         os.makedirs(tasks_dir)
 
         # Écrire une tâche Todo
-        t1 = {"id": "TSK-001", "status": "Todo", "title": "Implement auth", "phase": "E-execute"}
+        t1 = {"id": "TSK-001", "status": "Todo", "title": "Implement auth", "phase": "E-execute", "complexity": "simple"}
         with open(os.path.join(tasks_dir, "TSK-001.json"), "w") as f:
             json.dump(t1, f)
 
         # Étape 1 : Plan
         step_report = step_autonomous_loop(tmpdir, "true")
-        assert "PLAN" in step_report
+        assert "DÉLÉGUER" in step_report
 
         # Étape 2 : Lancer la boucle en Implementation
         # (doit passer à Recette et exécuter les tests)
@@ -488,6 +488,44 @@ def test_task_classify(monkeypatch):
         assert "invalide" in server.effortless_task_classify(tsk_id, "trivial")
         # ID inconnu
         assert "introuvable" in server.effortless_task_classify("TSK-X-99", "simple")
+
+
+def test_loop_plan_delegation_branches(monkeypatch):
+    from effortless_mcp import server
+    from effortless_mcp.services import session_loop as sl
+    import json as _json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
+
+        def add(title, complexity=None):
+            msg = server.effortless_task_add(title, complexity=complexity)
+            return msg.split("Tâche ")[1].split(" ")[0]
+
+        # 1. Tâche non classée -> TRIAGE
+        t_none = add("non classée")
+        server.effortless_loop_init("g")
+        out = sl.step_autonomous_loop(tmpdir, "true")
+        assert "TRIAGE" in out
+        with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:
+            assert _json.load(f)["status"] == "Todo"  # pas avancée
+
+        # 2. Classée complex -> DÉCOMPOSER
+        server.effortless_task_classify(t_none, "complex")
+        out2 = sl.step_autonomous_loop(tmpdir, "true")
+        assert "DÉCOMPOSER" in out2
+        with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:
+            assert _json.load(f)["status"] == "Todo"
+
+        # 3. Classée simple -> DÉLÉGUER + Implementation
+        server.effortless_task_classify(t_none, "simple")
+        out3 = sl.step_autonomous_loop(tmpdir, "true")
+        assert "DÉLÉGUER" in out3
+        with open(os.path.join(tmpdir, ".effortless", "loop_state.json"), encoding="utf-8") as f:
+            assert _json.load(f)["step"] == "Implementation"
+        with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:
+            assert _json.load(f)["status"] == "Doing"
 
 
 

@@ -96,6 +96,25 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
 
         next_task = eligible[0]
 
+        # --- Délégation systématique : aiguillage selon la complexité ---
+        complexity = next_task.get("complexity")
+        if complexity is None:
+            return (
+                f"🔎 [TRIAGE] Tâche {next_task['id']} : {next_task['title']} — non classée.\n"
+                "👉 Classe-la via effortless_task_classify(task_id, 'simple'|'complex'), "
+                "puis relance effortless_loop_step. (Critère : 'simple' = mécanique, sans "
+                "réflexion ; 'complex' = raisonnement/architecture/arbitrage.)"
+            )
+        if complexity == "complex":
+            return (
+                f"🧩 [DÉCOMPOSER] Tâche complexe {next_task['id']} : {next_task['title']}.\n"
+                "👉 Découpe-la en sous-tâches SIMPLES via "
+                "effortless_task_add(title, complexity='simple', depends_on=[...]), "
+                f"puis marque {next_task['id']} 'Done' via effortless_task_update. "
+                "Relance ensuite effortless_loop_step."
+            )
+        # complexity == "simple" : flux nominal d'exécution, délégation imposée.
+
         # Activer la tâche
         next_task["status"] = "Doing"
         save_entity(tasks_dir, next_task["id"], next_task)
@@ -106,9 +125,12 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
         _save_loop_state(loop_file, loop_state)
 
         return (
-            f"📋 [PLAN] Tâche sélectionnée : **{next_task['id']}** : {next_task['title']}\n"
+            f"📋 [DÉLÉGUER] Tâche simple sélectionnée : **{next_task['id']}** : {next_task['title']}\n"
             f"Statut de la boucle : **Implementation**\n"
-            f"👉 Consigne : Développez l'implémentation de cette tâche. Une fois fait, relancez `effortless_loop_step` pour lancer la recette."
+            "👉 Consigne : délègue cette tâche à un sous-agent (outil Agent), avec un prompt "
+            "fermé et borné ; récupère un résultat compact ; n'implémente PAS toi-même "
+            "(garde la conclusion, pas les détails). Une fois fait, relance effortless_loop_step "
+            "pour lancer la recette."
         )
 
     elif step == "Implementation" or step == "Correction":
