@@ -298,7 +298,7 @@ def effortless_phase_next() -> str:
     # Effectuer la transition
     next_phase = phases_list[current_idx + 1]
     
-    state_data["completed_phases"].append({
+    state_data.setdefault("completed_phases", []).append({
         "id": current_phase_id,
         "completed_at": datetime.utcnow().isoformat() + "Z"
     })
@@ -631,6 +631,8 @@ def effortless_task_update(
 
     # Sauvegarde JSON individuelle
     save_entity(paths["tasks"], task_id, target_task)
+
+    return f"Tâche '{task_id}' mise à jour avec le statut '{status}'."
 
 @mcp.tool()
 def effortless_secondbrain_sync() -> str:

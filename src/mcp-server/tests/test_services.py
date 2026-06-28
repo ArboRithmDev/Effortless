@@ -310,6 +310,26 @@ def test_deploy_to_mcp_clients(monkeypatch):
             assert len(json.load(f)["mcpServers"]) == 1
 
 
+def test_task_update_returns_confirmation(monkeypatch):
+    # Régression : effortless_task_update doit renvoyer une confirmation, pas None.
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
+        os.makedirs(tasks_dir)
+        with open(os.path.join(tasks_dir, "TSK-001.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "TSK-001", "status": "Todo", "title": "T", "phase": "E-execute"}, f)
+
+        result = server.effortless_task_update("TSK-001", "Doing")
+        assert result is not None
+        assert "TSK-001" in result
+        assert "Doing" in result
+
+        # La sauvegarde individuelle doit refléter le nouveau statut.
+        with open(os.path.join(tasks_dir, "TSK-001.json"), encoding="utf-8") as f:
+            assert json.load(f)["status"] == "Doing"
+
+
 def test_repo_analyzer_and_migration_planner(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         # Créer des fichiers simulant un dépôt existant

@@ -77,8 +77,11 @@ def install_git_pre_commit_hook(project_root: str) -> str:
 
 echo -e "\\033[0;34m[Effortless] Analyse anti-drift avant commit...\\033[0m"
 
+# Résoudre la racine du dépôt dynamiquement (résiste à un déplacement du projet)
+REPO="$(git rev-parse --show-toplevel)"
+
 # Appeler le validateur CLI en mode drift-check strict
-"{project_root}/src/mcp-server/.venv/bin/python" "{project_root}/src/cli/main.py" --drift-check-strict
+"$REPO/src/mcp-server/.venv/bin/python" "$REPO/src/cli/main.py" --drift-check-strict
 
 EXIT_CODE=$?
 

@@ -54,14 +54,14 @@ def load_questions_from_path(path: str) -> List[Dict[str, Any]]:
                 try:
                     with open(os.path.join(path, filename), "r", encoding="utf-8") as f:
                         questions.append(json.load(f))
-                except:
+                except (json.JSONDecodeError, OSError):
                     pass
         return questions
     else:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError):
             return []
 
 def validate_phase_documents(

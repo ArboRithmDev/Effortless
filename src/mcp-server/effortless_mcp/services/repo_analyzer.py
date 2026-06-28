@@ -16,11 +16,13 @@ def analyze_target_repo(repo_path: str) -> Dict[str, Any]:
     source_files_count = 0
     detected_folders = []
 
+    ignored_dirs = {".git", "node_modules", ".venv", "venv", ".effortless", "dist", "build"}
+
     # Parcourir les fichiers pour détecter la signature de la stack
     for root, dirs, files in os.walk(repo_path):
-        # Ignorer les dossiers système ou virtuels
-        if any(ignored in root for ignored in [".git", "node_modules", ".venv", "venv", ".effortless", "dist", "build"]):
-            continue
+        # Élaguer in-place les dossiers système/virtuels (match exact sur le nom,
+        # pas une sous-chaîne du chemin) pour ne pas descendre dedans.
+        dirs[:] = [d for d in dirs if d not in ignored_dirs]
 
         for file in files:
             # Détection Stack

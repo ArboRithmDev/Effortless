@@ -10,15 +10,27 @@ def get_secondbrain_vault_path() -> Optional[str]:
     """
     Tente de lire la configuration de SecondBrain pour récupérer le chemin du Vault.
     """
-    config_path = os.path.expanduser("~/.memory-kit/config.json")
-    if not os.path.exists(config_path):
-        return None
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data.get("vault")
-    except Exception:
-        return None
+    # Ordre canonique : $CLAUDE_CONFIG_DIR/memory-kit.json → ~/.claude/memory-kit.json
+    # → ~/.memory-kit/config.json (repli legacy). Le premier qui expose un `vault` gagne.
+    candidates = []
+    cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if cfg_dir:
+        candidates.append(os.path.join(cfg_dir, "memory-kit.json"))
+    candidates.append(os.path.expanduser("~/.claude/memory-kit.json"))
+    candidates.append(os.path.expanduser("~/.memory-kit/config.json"))
+
+    for config_path in candidates:
+        if not os.path.exists(config_path):
+            continue
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            vault = data.get("vault")
+            if vault:
+                return vault
+        except Exception:
+            continue
+    return None
 
 def sync_phase_to_secondbrain(project_slug: str, phase_id: str) -> bool:
     """
