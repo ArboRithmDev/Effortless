@@ -1,0 +1,267 @@
+import os
+import tempfile
+import json
+import pytest
+from effortless_mcp.services.markdown import parse_markdown_frontmatter, write_markdown_frontmatter
+from effortless_mcp.services.validation import validate_phase_documents, validate_document_structure, load_questions_from_path
+from effortless_mcp.services.sync import sync_decisions_to_markdown, sync_questions_to_markdown
+from effortless_mcp.services.secondbrain import sync_phase_to_secondbrain, create_secondbrain_archive, get_secondbrain_vault_path
+from effortless_mcp.services.drift import check_project_drift, install_git_pre_commit_hook
+from effortless_mcp.services.deploy import deploy_to_mcp_clients
+
+
+
+def test_markdown_frontmatter():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        file_path = os.path.join(tmpdir, "test.md")
+        metadata = {"phase": "O-analyse", "statut": "Actif", "version": 1}
+        content = "# Titre\nContenu de test."
+
+        write_markdown_frontmatter(file_path, metadata, content)
+
+        assert os.path.exists(file_path)
+
+        parsed_metadata, parsed_content = parse_markdown_frontmatter(file_path)
+        assert parsed_metadata == metadata
+        assert "Contenu de test." in parsed_content
+
+def test_validate_phase_documents():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        current_phase_id = "O-analyse"
+        required_documents = [
+            "cadrage/00-test.md",
+            "cadrage/01-bqo.md"
+        ]
+
+        cadrage_dir = os.path.join(tmpdir, "cadrage")
+        os.makedirs(cadrage_dir)
+
+        # 1. Manquant
+        questions_path = os.path.join(tmpdir, "questions.json")
+        with open(questions_path, "w") as f:
+            json.dump([], f)
+
+        is_valid, checklist, reasons = validate_phase_documents(
+            tmpdir, current_phase_id, required_documents, questions_path
+        )
+        assert not is_valid
+        assert len(reasons) == 2
+
+        # 2. Présents mais incorrects (pas de frontmatter)
+        doc1_path = os.path.join(cadrage_dir, "00-test.md")
+        doc2_path = os.path.join(cadrage_dir, "01-bqo.md")
+        with open(doc1_path, "w") as f:
+            f.write("# Pas de frontmatter")
+        with open(doc2_path, "w") as f:
+            f.write("# Pas de frontmatter")
+
+        is_valid, checklist, reasons = validate_phase_documents(
+            tmpdir, current_phase_id, required_documents, questions_path
+        )
+        assert not is_valid
+
+        # 3. Présents et corrects (mais BQO non résolu par son statut)
+        write_markdown_frontmatter(doc1_path, {"phase": "O-analyse", "statut": "Actif"}, "# Test")
+        write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "En attente"}, "## Tableau Récapitulatif\n## Détail des Questions\n")
+
+        is_valid, checklist, reasons = validate_phase_documents(
+            tmpdir, current_phase_id, required_documents, questions_path
+        )
+        assert not is_valid
+        assert any("BQO non résolu" in r for r in reasons)
+
+        # 4. Résolu
+        write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "Résolu"}, "## Tableau Récapitulatif\n## Détail des Questions\n")
+        is_valid, checklist, reasons = validate_phase_documents(
+            tmpdir, current_phase_id, required_documents, questions_path
+        )
+        assert is_valid
+        assert len(reasons) == 0
+
+def test_validate_document_structure():
+    # Test placeholders
+    errors = validate_document_structure("/path/to/test.md", "00-test.md", "Contenu avec TODO à faire.")
+    assert len(errors) == 1
+    assert "TODO" in errors[0]
+
+    # Test glossaire ignore placeholders
+    errors = validate_document_structure("/path/to/glossaire.md", "00-FNC-GLO-glossaire.md", "Contenu avec TODO.")
+    assert len(errors) == 0
+
+    # Test sections manquantes pour BQO
+    errors = validate_document_structure("/path/to/01-bqo.md", "01-bqo.md", "## Tableau Récapitulatif\n")
+    assert len(errors) == 1
+    assert "Détail des Questions" in errors[0]
+
+def test_sync_services():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        decisions_path = os.path.join(tmpdir, "decisions.md")
+        decisions = [
+            {
+                "id": "DEC-01",
+                "title": "Test stack",
+                "status": "Accepted",
+                "phase": "O-analyse",
+                "date": "2026-06-28",
+                "context": "Context test",
+                "decision": "Decision test",
+                "consequences": ["Cons 1"],
+                "rejected_alternatives": ["Alt 1"]
+            }
+        ]
+
+        sync_decisions_to_markdown(decisions_path, "O-analyse", decisions)
+        assert os.path.exists(decisions_path)
+        
+        metadata, content = parse_markdown_frontmatter(decisions_path)
+        assert metadata["phase"] == "O-analyse"
+        assert "DEC-01" in content
+        assert "Test stack" in content
+
+        questions_path = os.path.join(tmpdir, "questions.md")
+        questions = [
+            {
+                "id": "Q-01",
+                "question": "Question ?",
+                "status": "Resolved",
+                "impact": "Blocker",
+                "context": "Context",
+                "suggestion": "Suggestion",
+                "answer": "Answer",
+                "date_resolved": "2026-06-28"
+            }
+        ]
+
+        sync_questions_to_markdown(questions_path, "O-analyse", "Effortless", questions)
+        assert os.path.exists(questions_path)
+        
+        metadata, content = parse_markdown_frontmatter(questions_path)
+        assert metadata["phase"] == "O-analyse"
+        assert metadata["statut"] == "Résolu"
+        assert "Q-01" in content
+        assert "Question ?" in content
+        assert "Answer" in content
+
+def test_load_questions_from_directory():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Créer des questions individuelles
+        q1 = {"id": "Q-01", "question": "Q1", "status": "Pending"}
+        q2 = {"id": "Q-02", "question": "Q2", "status": "Resolved"}
+        
+        with open(os.path.join(tmpdir, "Q-01.json"), "w") as f:
+            json.dump(q1, f)
+        with open(os.path.join(tmpdir, "Q-02.json"), "w") as f:
+            json.dump(q2, f)
+            
+        questions = load_questions_from_path(tmpdir)
+        assert len(questions) == 2
+        assert any(q["id"] == "Q-01" for q in questions)
+        assert any(q["id"] == "Q-02" for q in questions)
+
+def test_secondbrain_integration(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Mock de get_secondbrain_vault_path pour renvoyer le répertoire temporaire
+        monkeypatch.setattr(
+            "effortless_mcp.services.secondbrain.get_secondbrain_vault_path",
+            lambda: tmpdir
+        )
+        
+        # Initialiser l'arborescence SecondBrain factice
+        project_dir = os.path.join(tmpdir, "10-episodes", "projects", "effortless")
+        os.makedirs(os.path.join(project_dir, "archives"))
+        
+        # 1. Créer context.md factice
+        context_path = os.path.join(project_dir, "context.md")
+        write_markdown_frontmatter(
+            context_path,
+            {"project": "effortless", "phase": "O-analyse", "last-session": "2026-06-27"},
+            "## 🚦 Current Phase\n- **O-analyse** : Analyse en cours.\n"
+        )
+        
+        # 2. Créer history.md factice
+        history_path = os.path.join(project_dir, "history.md")
+        write_markdown_frontmatter(
+            history_path,
+            {"project": "effortless"},
+            "# Effortless — Historique des sessions\n\n_(no sessions yet)\n"
+        )
+        
+        # Tester sync_phase_to_secondbrain
+        success = sync_phase_to_secondbrain("effortless", "E-execute")
+        assert success
+        
+        metadata, content = parse_markdown_frontmatter(context_path)
+        assert metadata["phase"] == "E-execute"
+        assert "E-execute" in content
+        
+        # Tester create_secondbrain_archive
+        archive_name = create_secondbrain_archive("effortless", "Test subject", "# Content test")
+        assert archive_name is not None
+        assert os.path.exists(os.path.join(project_dir, "archives", archive_name))
+        
+        # Vérifier que history.md a été mis à jour
+        _, hist_content = parse_markdown_frontmatter(history_path)
+        assert "Test subject" in hist_content
+        assert archive_name in hist_content
+
+def test_drift_check_logic(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tasks_dir = os.path.join(tmpdir, "tasks")
+        os.makedirs(tasks_dir)
+        
+        # 1. Pas de modifs, pas de tâches active -> pas de drift
+        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: [])
+        is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
+        assert not is_drifting
+        assert len(mod_files) == 0
+        
+        # 2. Des modifs hors de src/ -> pas de drift
+        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: ["README.md", "cadrage/test.md"])
+        is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
+        assert not is_drifting
+        
+        # 3. Des modifs dans src/ mais 0 tâche active -> DRIFT !
+        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: ["src/cli/main.py"])
+        is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
+        assert is_drifting
+        assert len(mod_files) == 1
+        
+        # 4. Des modifs dans src/ et 1 tâche active ("Doing") -> pas de drift
+        t1 = {"id": "TSK-001", "status": "Doing", "title": "Active task"}
+        with open(os.path.join(tasks_dir, "TSK-001.json"), "w") as f:
+            json.dump(t1, f)
+            
+        is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
+        assert not is_drifting
+        assert len(active) == 1
+
+def test_deploy_to_mcp_clients(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Mock de os.path.expanduser pour rediriger vers notre tmpdir
+        def mock_expanduser(path):
+            clean_path = path.replace("~/", "")
+            return os.path.join(tmpdir, clean_path)
+            
+        monkeypatch.setattr("os.path.expanduser", mock_expanduser)
+        
+        # Créer le répertoire .gemini/config et .claude factices pour forcer la détection
+        os.makedirs(os.path.join(tmpdir, ".gemini", "config"))
+        os.makedirs(os.path.join(tmpdir, ".claude"))
+        
+        # Créer un fichier de skill source factice dans le projet temporaire
+        source_skill_dir = os.path.join(tmpdir, "skills", "effortless")
+        os.makedirs(source_skill_dir)
+        with open(os.path.join(source_skill_dir, "SKILL.md"), "w") as f:
+            f.write("# Skill content")
+            
+        # Exécuter le déploiement
+        results = deploy_to_mcp_clients(tmpdir)
+        
+        assert len(results) > 0
+        # Vérifier que les fichiers ont été copiés/écrits
+        assert any(r["name"] == "Antigravity CLI" and r["status"] == "success" for r in results)
+        assert any(r["name"] == "Claude Code" and r["status"] == "success" for r in results)
+
+
+
+
