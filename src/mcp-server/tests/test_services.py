@@ -470,6 +470,26 @@ def test_task_add_stores_and_validates_complexity(monkeypatch):
         assert before == after
 
 
+def test_task_classify(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        msg = server.effortless_task_add("T")
+        tsk_id = msg.split("Tâche ")[1].split(" ")[0]
+
+        # classification réussie
+        ok = server.effortless_task_classify(tsk_id, "complex")
+        assert tsk_id in ok and "complex" in ok
+        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
+            assert json.load(f)["complexity"] == "complex"
+
+        # valeur invalide
+        assert "invalide" in server.effortless_task_classify(tsk_id, "trivial")
+        # ID inconnu
+        assert "introuvable" in server.effortless_task_classify("TSK-X-99", "simple")
+
+
 
 
 

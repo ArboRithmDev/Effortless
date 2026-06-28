@@ -696,6 +696,34 @@ def effortless_task_update(
     return f"Tâche '{task_id}' mise à jour avec le statut '{status}'."
 
 @mcp.tool()
+def effortless_task_classify(
+    task_id: str,
+    complexity: str  # simple | complex
+) -> str:
+    """
+    Classe une tâche existante selon sa complexité (simple ou complex).
+    Utilisé notamment par l'étape de triage de la boucle autonome.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+
+    if not os.path.exists(paths["tasks"]):
+        return "Erreur : Projet non initialisé."
+
+    if complexity not in ("simple", "complex"):
+        return f"Erreur : complexity invalide '{complexity}'. Valeurs autorisées : simple, complex."
+
+    tasks = load_entities(paths["tasks"])
+    target = next((t for t in tasks if t["id"] == task_id), None)
+    if not target:
+        return f"Erreur : Tâche '{task_id}' introuvable."
+
+    target["complexity"] = complexity
+    save_entity(paths["tasks"], task_id, target)
+
+    return f"Tâche '{task_id}' classée '{complexity}'."
+
+@mcp.tool()
 def effortless_secondbrain_sync() -> str:
     """
     Force la synchronisation immédiate de l'état projet et des décisions vers le Vault SecondBrain.
