@@ -30,8 +30,13 @@ from effortless_mcp.services.session_loop import init_autonomous_loop, step_auto
 mcp = FastMCP("Effortless")
 
 def get_project_root() -> str:
-    """Retourne la racine du projet courant."""
-    return os.getcwd()
+    """Retourne la racine du projet courant.
+
+    Priorité à la variable d'environnement EFFORTLESS_PROJECT_ROOT (injectée par
+    le déploiement multi-client), car la plupart des clients MCP ne lancent pas
+    le serveur avec le cwd positionné sur la racine du projet. Repli sur le cwd.
+    """
+    return os.environ.get("EFFORTLESS_PROJECT_ROOT") or os.getcwd()
 
 def get_paths(root: str) -> Dict[str, str]:
     """Retourne tous les chemins de fichiers clés pour un projet."""

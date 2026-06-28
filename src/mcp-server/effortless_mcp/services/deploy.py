@@ -4,13 +4,14 @@ import shutil
 import sys
 from typing import List, Dict, Any
 
+
 def inject_toml_block(config_path: str, block: str):
     """
     Injecte de manière idempotente un bloc TOML délimité par des marqueurs Effortless.
     """
     start_marker = "# EFFORTLESS:START"
     end_marker = "# EFFORTLESS:END"
-    
+
     existing = ""
     if os.path.exists(config_path):
         try:
@@ -18,7 +19,7 @@ def inject_toml_block(config_path: str, block: str):
                 existing = f.read()
         except Exception:
             pass
-            
+
     if start_marker in existing and end_marker in existing:
         # Remplacer le bloc existant
         before = existing.split(start_marker)[0]
@@ -27,20 +28,60 @@ def inject_toml_block(config_path: str, block: str):
     else:
         # Appendre à la fin
         new_content = existing.strip() + "\n\n" + start_marker + "\n" + block.strip() + "\n" + end_marker + "\n"
-        
+
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         f.write(new_content)
+
+
+def inject_json_mcp_server(config_path: str, server_name: str, entry: Dict[str, Any]):
+    """
+    Déclare/met à jour de manière idempotente un serveur MCP dans un fichier de
+    configuration JSON exposant une clé `mcpServers`. Préserve les autres serveurs
+    et le reste de la configuration. UTF-8 sans BOM, accents conservés.
+    """
+    config_data: Dict[str, Any] = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            config_data = {}
+
+    if not isinstance(config_data, dict):
+        config_data = {}
+    if not isinstance(config_data.get("mcpServers"), dict):
+        config_data["mcpServers"] = {}
+
+    config_data["mcpServers"][server_name] = entry
+
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+
 
 def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
     """
     Détecte et configure le serveur MCP et ses Skills sur l'ensemble des CLI IA
     (Claude Desktop, Claude Code, Codex, Mistral Vibe, Copilot CLI, Antigravity).
+
+    Le serveur MCP est déclaré GLOBALEMENT sur chaque client, en injectant la
+    variable d'environnement EFFORTLESS_PROJECT_ROOT (le serveur l'utilise pour
+    localiser le projet : la plupart des clients ne fixent pas le cwd sur la racine).
     """
     results = []
     source_skill = os.path.join(project_root, "skills", "effortless", "SKILL.md")
+    mcp_cmd = os.path.join(
+        project_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
+    )
+    # Entrée MCP commune aux clients JSON.
+    json_entry = {
+        "command": mcp_cmd,
+        "args": [],
+        "env": {"EFFORTLESS_PROJECT_ROOT": project_root},
+    }
 
-    # 1. Claude Desktop Config
+    # 1. Claude Desktop
     claude_desktop_path = None
     if sys.platform == "darwin":
         claude_desktop_path = os.path.expanduser(
@@ -53,30 +94,9 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
                 appdata, "Claude", "claude_desktop_config.json"
             )
 
-    if claude_desktop_path:
-        os.makedirs(os.path.dirname(claude_desktop_path), exist_ok=True)
-        config_data = {"mcpServers": {}}
-        
-        if os.path.exists(claude_desktop_path):
-            try:
-                with open(claude_desktop_path, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
-            except Exception:
-                pass
-
-        if "mcpServers" not in config_data:
-            config_data["mcpServers"] = {}
-
-        config_data["mcpServers"]["effortless"] = {
-            "command": os.path.join(
-                project_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
-            ),
-            "cwd": project_root
-        }
-
+    if claude_desktop_path and os.path.isdir(os.path.dirname(claude_desktop_path)):
         try:
-            with open(claude_desktop_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=2, ensure_ascii=False)
+            inject_json_mcp_server(claude_desktop_path, "effortless", json_entry)
             results.append({
                 "name": "Claude Desktop",
                 "status": "success",
@@ -94,25 +114,36 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
     # 2. Claude Code
     claude_code_dir = os.path.expanduser("~/.claude")
     if os.path.exists(claude_code_dir):
+        # 2a. Déclaration du serveur MCP dans ~/.claude.json (global)
+        claude_code_config = os.path.expanduser("~/.claude.json")
+        mcp_action = "Configured MCP server"
+        mcp_status = "success"
+        try:
+            inject_json_mcp_server(claude_code_config, "effortless", json_entry)
+        except Exception as e:
+            mcp_status = "error"
+            mcp_action = f"Failed to configure MCP: {str(e)}"
+
+        # 2b. Copie du Skill d'instruction
         skills_target = os.path.join(claude_code_dir, "skills")
         os.makedirs(skills_target, exist_ok=True)
         target_file = os.path.join(skills_target, "effortless.md")
         if os.path.exists(source_skill):
             try:
                 shutil.copy2(source_skill, target_file)
-                results.append({
-                    "name": "Claude Code",
-                    "status": "success",
-                    "path": target_file,
-                    "action": "Copied instruction Skill"
-                })
+                if mcp_status == "success":
+                    mcp_action = "Configured MCP server and copied Skill"
             except Exception as e:
-                results.append({
-                    "name": "Claude Code",
-                    "status": "error",
-                    "path": target_file,
-                    "action": f"Failed: {str(e)}"
-                })
+                if mcp_status == "success":
+                    mcp_status = "error"
+                    mcp_action = f"MCP configured but Skill copy failed: {str(e)}"
+
+        results.append({
+            "name": "Claude Code",
+            "status": mcp_status,
+            "path": claude_code_config,
+            "action": mcp_action
+        })
 
     # 3. Codex (OpenAI)
     codex_dir = os.path.expanduser("~/.codex")
@@ -120,7 +151,7 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
         skills_target = os.path.join(codex_dir, "skills", "effortless")
         os.makedirs(skills_target, exist_ok=True)
         target_file = os.path.join(skills_target, "SKILL.md")
-        
+
         # Copier Skill
         skill_copied = False
         if os.path.exists(source_skill):
@@ -130,10 +161,14 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-        # Configurer TOML
+        # Configurer TOML (avec env pour localiser le projet)
         toml_path = os.path.join(codex_dir, "config.toml")
-        mcp_cmd = os.path.join(project_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp")
-        block = f"[mcp_servers.effortless]\ncommand = '{mcp_cmd}'\nargs = []\n"
+        block = (
+            "[mcp_servers.effortless]\n"
+            f"command = '{mcp_cmd}'\n"
+            "args = []\n"
+            f"env = {{ EFFORTLESS_PROJECT_ROOT = '{project_root}' }}\n"
+        )
         try:
             inject_toml_block(toml_path, block)
             results.append({
@@ -156,7 +191,7 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
         skills_target = os.path.join(vibe_dir, "skills", "effortless")
         os.makedirs(skills_target, exist_ok=True)
         target_file = os.path.join(skills_target, "SKILL.md")
-        
+
         # Copier Skill
         skill_copied = False
         if os.path.exists(source_skill):
@@ -166,10 +201,16 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-        # Configurer TOML
+        # Configurer TOML (avec env pour localiser le projet)
         toml_path = os.path.join(vibe_dir, "config.toml")
-        mcp_cmd = os.path.join(project_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp")
-        block = f"[[mcp_servers]]\nname = \"effortless\"\ntransport = \"stdio\"\ncommand = \"{mcp_cmd}\"\nargs = []\n"
+        block = (
+            "[[mcp_servers]]\n"
+            "name = \"effortless\"\n"
+            "transport = \"stdio\"\n"
+            f"command = \"{mcp_cmd}\"\n"
+            "args = []\n"
+            f"env = {{ EFFORTLESS_PROJECT_ROOT = \"{project_root}\" }}\n"
+        )
         try:
             inject_toml_block(toml_path, block)
             results.append({
@@ -192,36 +233,44 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
         skills_target = os.path.join(copilot_dir, "skills", "effortless")
         os.makedirs(skills_target, exist_ok=True)
         target_file = os.path.join(skills_target, "SKILL.md")
+
+        skill_copied = False
         if os.path.exists(source_skill):
             try:
                 shutil.copy2(source_skill, target_file)
-                results.append({
-                    "name": "GitHub Copilot",
-                    "status": "success",
-                    "path": target_file,
-                    "action": "Copied instruction Skill"
-                })
-            except Exception as e:
-                results.append({
-                    "name": "GitHub Copilot",
-                    "status": "error",
-                    "path": target_file,
-                    "action": f"Failed: {str(e)}"
-                })
+                skill_copied = True
+            except Exception:
+                pass
 
-    # 6. Antigravity CLI
-    antigravity_plugins_dir = os.path.expanduser("~/.gemini/config/plugins")
-    if os.path.exists(os.path.expanduser("~/.gemini/config")):
-        os.makedirs(antigravity_plugins_dir, exist_ok=True)
-        target_plugin_dir = os.path.join(antigravity_plugins_dir, "effortless")
-        os.makedirs(os.path.join(target_plugin_dir, "skills", "effortless"), exist_ok=True)
-        
-        target_skill = os.path.join(target_plugin_dir, "skills", "effortless", "SKILL.md")
-        
+        # Déclaration du serveur MCP dans ~/.copilot/mcp-config.json
+        copilot_config = os.path.join(copilot_dir, "mcp-config.json")
+        try:
+            inject_json_mcp_server(copilot_config, "effortless", json_entry)
+            results.append({
+                "name": "GitHub Copilot",
+                "status": "success",
+                "path": copilot_config,
+                "action": "Configured MCP server and copied Skill" if skill_copied else "Configured MCP server"
+            })
+        except Exception as e:
+            results.append({
+                "name": "GitHub Copilot",
+                "status": "error",
+                "path": copilot_config,
+                "action": f"Failed to configure: {str(e)}"
+            })
+
+    # 6. Antigravity CLI (Gemini)
+    gemini_config_dir = os.path.expanduser("~/.gemini/config")
+    if os.path.exists(gemini_config_dir):
+        skill_copied = False
         if os.path.exists(source_skill):
             try:
+                antigravity_plugins_dir = os.path.join(gemini_config_dir, "plugins")
+                target_plugin_dir = os.path.join(antigravity_plugins_dir, "effortless")
+                os.makedirs(os.path.join(target_plugin_dir, "skills", "effortless"), exist_ok=True)
+                target_skill = os.path.join(target_plugin_dir, "skills", "effortless", "SKILL.md")
                 shutil.copy2(source_skill, target_skill)
-                # Créer le plugin.json
                 plugin_json = {
                     "name": "effortless",
                     "version": "0.3.0",
@@ -229,19 +278,26 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
                 }
                 with open(os.path.join(target_plugin_dir, "plugin.json"), "w", encoding="utf-8") as f:
                     json.dump(plugin_json, f, indent=2)
-                    
-                results.append({
-                    "name": "Antigravity CLI",
-                    "status": "success",
-                    "path": target_plugin_dir,
-                    "action": "Installed plugin and Skill"
-                })
-            except Exception as e:
-                results.append({
-                    "name": "Antigravity CLI",
-                    "status": "error",
-                    "path": target_plugin_dir,
-                    "action": f"Failed to install plugin: {str(e)}"
-                })
+                skill_copied = True
+            except Exception:
+                pass
+
+        # Déclaration du serveur MCP dans ~/.gemini/settings.json
+        gemini_settings = os.path.expanduser("~/.gemini/settings.json")
+        try:
+            inject_json_mcp_server(gemini_settings, "effortless", json_entry)
+            results.append({
+                "name": "Antigravity CLI",
+                "status": "success",
+                "path": gemini_settings,
+                "action": "Configured MCP server and installed plugin/Skill" if skill_copied else "Configured MCP server"
+            })
+        except Exception as e:
+            results.append({
+                "name": "Antigravity CLI",
+                "status": "error",
+                "path": gemini_settings,
+                "action": f"Failed to configure: {str(e)}"
+            })
 
     return results

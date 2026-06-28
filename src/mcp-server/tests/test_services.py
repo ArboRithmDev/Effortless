@@ -271,6 +271,44 @@ def test_deploy_to_mcp_clients(monkeypatch):
         assert any(r["name"] == "Mistral Vibe" and r["status"] == "success" for r in results)
         assert any(r["name"] == "GitHub Copilot" and r["status"] == "success" for r in results)
 
+        # Le serveur MCP doit être DÉCLARÉ (pas seulement le Skill copié) sur les
+        # clients JSON, avec l'env EFFORTLESS_PROJECT_ROOT pointant le projet.
+        expected_cmd = os.path.join(tmpdir, "src", "mcp-server", ".venv", "bin", "effortless-mcp")
+
+        # Claude Code -> ~/.claude.json
+        with open(os.path.join(tmpdir, ".claude.json"), encoding="utf-8") as f:
+            cc = json.load(f)
+        entry = cc["mcpServers"]["effortless"]
+        assert entry["command"] == expected_cmd
+        assert entry["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
+
+        # GitHub Copilot -> ~/.copilot/mcp-config.json
+        with open(os.path.join(tmpdir, ".copilot", "mcp-config.json"), encoding="utf-8") as f:
+            cop = json.load(f)
+        assert cop["mcpServers"]["effortless"]["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
+
+        # Antigravity (Gemini) -> ~/.gemini/settings.json
+        with open(os.path.join(tmpdir, ".gemini", "settings.json"), encoding="utf-8") as f:
+            gem = json.load(f)
+        assert gem["mcpServers"]["effortless"]["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
+
+        # Codex / Vibe -> bloc TOML idempotent avec env
+        with open(os.path.join(tmpdir, ".codex", "config.toml"), encoding="utf-8") as f:
+            codex_toml = f.read()
+        assert "[mcp_servers.effortless]" in codex_toml
+        assert "EFFORTLESS_PROJECT_ROOT" in codex_toml
+
+        with open(os.path.join(tmpdir, ".vibe", "config.toml"), encoding="utf-8") as f:
+            vibe_toml = f.read()
+        assert "EFFORTLESS_PROJECT_ROOT" in vibe_toml
+
+        # Idempotence : un second déploiement ne duplique pas l'entrée.
+        deploy_to_mcp_clients(tmpdir)
+        with open(os.path.join(tmpdir, ".codex", "config.toml"), encoding="utf-8") as f:
+            assert f.read().count("[mcp_servers.effortless]") == 1
+        with open(os.path.join(tmpdir, ".claude.json"), encoding="utf-8") as f:
+            assert len(json.load(f)["mcpServers"]) == 1
+
 
 def test_repo_analyzer_and_migration_planner(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
