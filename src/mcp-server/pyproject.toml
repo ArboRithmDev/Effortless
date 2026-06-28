@@ -1,8 +1,9 @@
 [project]
 name = "effortless-mcp"
-version = "0.1.0"
+version = "0.3.0"
 description = "Agnostic project management framework MCP server"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=2.13",

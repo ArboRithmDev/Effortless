@@ -6,3 +6,8 @@ __pycache__/
 *.egg-info/
 dist/
 
+
+# Scratch orchestration (subagent-driven dev)
+.superpowers/
+# État éphémère de la boucle autonome
+.effortless/loop_state.json
