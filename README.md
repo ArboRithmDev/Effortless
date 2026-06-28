@@ -25,7 +25,7 @@ It combines three ideas:
 - **A git-friendly database** — decisions, questions and tasks live as one JSON file per entity under `.effortless/`, with Markdown views rendered for humans. Diff-able, merge-friendly, team-ready.
 - **An MCP control surface** — 18 tools an LLM agent calls to drive the project, plus an autonomous loop that delegates simple work to sub-agents and a live web dashboard.
 
-Effortless is built on the storage/adapter philosophy of **SecondBrain** and the phase-sequencing rigor of **Orcha (OPAL)**, and it integrates back into a SecondBrain memory vault.
+Effortless is built on the storage/adapter philosophy of **[SecondBrain](https://github.com/SI-GMT/SecondBrain)** and the phase-sequencing rigor of **Orcha (OPAL)**, and it integrates back into a SecondBrain memory vault.
 
 ---
 
@@ -217,6 +217,8 @@ You: "Did we drift?"
 | `effortless_secondbrain_sync` | Push the project state + decisions into your SecondBrain vault (updates `context.md`, creates a timestamped archive). |
 
 The sync is **non-destructive**: it writes only Effortless-namespaced frontmatter keys (`effortless_phase`, `effortless_last_sync`) and never overwrites fields owned by your memory vault.
+
+> **SecondBrain** is a separate open-source project — persistent cross-session memory for LLM CLIs (Claude Code, Gemini CLI, Codex, Mistral Vibe), stored as a local Markdown vault you can browse in Obsidian. Repo: <https://github.com/SI-GMT/SecondBrain>
 
 ### 8 · Migrating an existing repository
 
