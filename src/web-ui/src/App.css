@@ -149,6 +149,12 @@
 }
 .foot { text-align: center; margin-top: 26px; }
 
+.task-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.cx { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); }
+.cx-simple { color: #6fe3b2; border-color: #2c6b51; }
+.cx-complex { color: #ff9aa3; border-color: #7a3038; }
+.cx-none { color: var(--text-dim); }
+
 @media (max-width: 640px) {
   .board { grid-template-columns: 1fr; }
 }
