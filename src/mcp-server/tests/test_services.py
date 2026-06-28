@@ -417,31 +417,57 @@ def test_autonomous_loop_lifecycle(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         # Mock de get_project_root pour pointer sur tmpdir
         monkeypatch.setattr("effortless_mcp.server.save_entity", lambda d, i, e: None)
-        
+
         # 1. Initialisation
         init_report = init_autonomous_loop(tmpdir, "Complete tests")
         assert "initialisée" in init_report
-        
+
         # Initialiser le dossier de tâches
         tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
         os.makedirs(tasks_dir)
-        
+
         # Écrire une tâche Todo
         t1 = {"id": "TSK-001", "status": "Todo", "title": "Implement auth", "phase": "E-execute"}
         with open(os.path.join(tasks_dir, "TSK-001.json"), "w") as f:
             json.dump(t1, f)
-            
+
         # Étape 1 : Plan
         step_report = step_autonomous_loop(tmpdir, "true")
         assert "PLAN" in step_report
-        
+
         # Étape 2 : Lancer la boucle en Implementation
         # (doit passer à Recette et exécuter les tests)
         monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: type("Res", (), {"returncode": 0, "stdout": "All tests passed", "stderr": ""})())
         monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: [])
-        
+
         step_report_2 = step_autonomous_loop(tmpdir, "true")
         assert "LIVRAISON" in step_report_2
+
+
+def test_task_add_stores_and_validates_complexity(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # complexity valide stockée
+        msg = server.effortless_task_add("T simple", complexity="simple")
+        tsk_id = msg.split("Tâche ")[1].split(" ")[0]
+        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
+            assert json.load(f)["complexity"] == "simple"
+
+        # absente => None
+        msg2 = server.effortless_task_add("T sans")
+        tsk_id2 = msg2.split("Tâche ")[1].split(" ")[0]
+        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id2}.json"), encoding="utf-8") as f:
+            assert json.load(f)["complexity"] is None
+
+        # valeur invalide rejetée, pas d'écriture
+        before = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
+        bad = server.effortless_task_add("T bad", complexity="trivial")
+        assert "invalide" in bad
+        after = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
+        assert before == after
 
 
 

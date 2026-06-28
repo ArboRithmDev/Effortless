@@ -604,7 +604,8 @@ def effortless_question_resolve(
 def effortless_task_add(
     title: str,
     description: Optional[str] = None,
-    depends_on: Optional[List[str]] = None
+    depends_on: Optional[List[str]] = None,
+    complexity: Optional[str] = None
 ) -> str:
     """
     Crée une tâche associée à la phase active du projet.
@@ -614,6 +615,9 @@ def effortless_task_add(
 
     if not os.path.exists(paths["tasks"]) or not os.path.exists(paths["state"]):
         return "Erreur : Projet non initialisé."
+
+    if complexity is not None and complexity not in ("simple", "complex"):
+        return f"Erreur : complexity invalide '{complexity}'. Valeurs autorisées : simple, complex."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -641,7 +645,8 @@ def effortless_task_add(
         description=description,
         status="Todo",
         phase=current_phase_id,
-        depends_on=depends_on or []
+        depends_on=depends_on or [],
+        complexity=complexity
     )
 
     new_task_dump = new_task.model_dump()
