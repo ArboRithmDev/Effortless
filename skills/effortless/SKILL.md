@@ -47,3 +47,26 @@ Dès que vous démarrez sur un projet équipé d'un fichier `effortless.json` ou
 Ne passez à la phase suivante (via `effortless_phase_next`) que si `effortless_status` indique `Éligibilité pour la phase suivante : ✅ OUI`. 
 
 En cas de blocage, résolvez d'abord les raisons indiquées (documents manquants/invalides ou questions BQO bloquantes non résolues).
+
+## ⚡ Délégation systématique
+
+Effortless ne lance pas de sous-agents lui-même : c'est **toi**, l'agent
+invocateur, qui délègues via ton outil d'agents.
+
+Règle : **traite uniquement le complexe** (raisonnement, architecture,
+arbitrages) et **délègue systématiquement le simple/mécanique** à un sous-agent
+à contexte frais.
+
+- Classe chaque tâche à sa création : `effortless_task_add(..., complexity="simple"|"complex")`.
+  Une tâche déjà créée se classe via `effortless_task_classify(task_id, complexity)`.
+- `simple` = mécanique, sans réflexion (édition ciblée, boilerplate, renommage,
+  exécution de tests, génération de doc) → **délègue** à un sous-agent : prompt
+  fermé et borné, résultat compact attendu. Garde la conclusion, pas les détails :
+  l'output verbeux ne doit pas entrer dans ton contexte.
+- `complex` = raisonnement/architecture/arbitrage → **décompose** en sous-tâches
+  simples (puis délègue celles-ci), ou traite directement la partie qui exige
+  vraiment ta réflexion.
+
+Dans la boucle autonome (`effortless_loop_step`), ces consignes sont émises
+automatiquement : `🔎 [TRIAGE]` (classe), `🧩 [DÉCOMPOSER]` (découpe), `📋
+[DÉLÉGUER]` (délègue). Hors boucle (mode OPAL manuel), applique la même doctrine.

@@ -100,7 +100,12 @@ function TaskBoard({ tasks }) {
               {items.length === 0 && <div className="muted small empty">—</div>}
               {items.map((t) => (
                 <article className="task" key={t.id}>
-                  <div className="task-id">{t.id}</div>
+                  <div className="task-row">
+                    <span className="task-id">{t.id}</span>
+                    <span className={`cx cx-${t.complexity || 'none'}`}>
+                      {t.complexity === 'complex' ? 'complex' : t.complexity === 'simple' ? 'simple' : '?'}
+                    </span>
+                  </div>
                   <div className="task-title">{t.title}</div>
                   {t.depends_on?.length > 0 && (
                     <div className="muted small">dépend de : {t.depends_on.join(', ')}</div>

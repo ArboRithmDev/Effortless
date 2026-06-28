@@ -8,3 +8,4 @@ class Task(BaseModel):
     status: str = "Todo"
     phase: str
     depends_on: List[str] = Field(default_factory=list)
+    complexity: Optional[str] = None
