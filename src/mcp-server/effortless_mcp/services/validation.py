@@ -10,7 +10,7 @@ def _has_h2_section(content: str, phrase: str) -> bool:
     un emoji ou une décoration entre `##` et le texte.
 
     Indispensable : le générateur (sync.py) émet des titres décorés
-    (`## 📋 Tableau Récapitulatif`) ; un simple substring `## tableau récapitulatif`
+    (`## 📋 Summary Table`) ; un simple substring `## summary table`
     ne les reconnaîtrait pas et bloquerait à tort la barrière de phase."""
     return re.search(r"(?mi)^\s*##\s+.*" + re.escape(phrase), content) is not None
 
@@ -26,7 +26,7 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
     # 1. Vérification des placeholders.
     # On exige des formes sentinelles explicites (crochets/chevrons) — un « ... » nu en
     # prose ou dans un extrait de code (def f(...)) est légitime et ne doit PAS bloquer.
-    placeholders = [r"\[\.\.\.\]", r"\[à compléter\]", r"\[insérer", r"<insérer", r"\bTODO\b", r"\bFIXME\b", r"\bXXX\b"]
+    placeholders = [r"\[\.\.\.\]", r"\[à compléter\]", r"\[to complete\]", r"\[insérer", r"<insérer", r"\[insert", r"<insert", r"\bTODO\b", r"\bFIXME\b", r"\bXXX\b"]
     for pattern in placeholders:
         if re.search(pattern, content, re.IGNORECASE):
             # Ignorer le glossaire qui peut légitimement lister ces termes
@@ -38,22 +38,22 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
     doc_lower = doc_rel_path.lower()
     
     if "bqo" in doc_lower or "questions" in doc_lower:
-        if not _has_h2_section(content, "tableau récapitulatif"):
-            errors.append("Required section missing: '## Tableau Récapitulatif'")
-        if not _has_h2_section(content, "détail des questions"):
-            errors.append("Required section missing: '## Détail des Questions'")
+        if not _has_h2_section(content, "summary table"):
+            errors.append("Required section missing: '## Summary Table'")
+        if not _has_h2_section(content, "question details"):
+            errors.append("Required section missing: '## Question Details'")
 
     elif "dec" in doc_lower or "decision" in doc_lower:
-        if not _has_h2_section(content, "liste des décisions"):
-            errors.append("Required section missing: '## Liste des Décisions'")
+        if not _has_h2_section(content, "decision list"):
+            errors.append("Required section missing: '## Decision List'")
 
     elif "arc" in doc_lower or "architecture" in doc_lower:
-        if not _has_h2_section(content, "composants clés"):
-            errors.append("Required section missing: '## Composants Clés'")
+        if not _has_h2_section(content, "key components"):
+            errors.append("Required section missing: '## Key Components'")
 
     elif "pln" in doc_lower or "plan" in doc_lower:
-        if not _has_h2_section(content, "découpage des tâches"):
-            errors.append("Required section missing: '## Découpage des Tâches'")
+        if not _has_h2_section(content, "task breakdown"):
+            errors.append("Required section missing: '## Task Breakdown'")
             
     return errors
 

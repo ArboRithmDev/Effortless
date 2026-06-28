@@ -65,7 +65,7 @@ def test_validate_phase_documents():
 
         # 3. Présents et corrects (mais BQO non résolu par son statut)
         write_markdown_frontmatter(doc1_path, {"phase": "O-analyse", "statut": "Actif"}, "# Test")
-        write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "En attente"}, "## Tableau Récapitulatif\n## Détail des Questions\n")
+        write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "En attente"}, "## Summary Table\n## Question Details\n")
 
         is_valid, checklist, reasons = validate_phase_documents(
             tmpdir, current_phase_id, required_documents, questions_path
@@ -74,7 +74,7 @@ def test_validate_phase_documents():
         assert any("Unresolved BQO" in r for r in reasons)
 
         # 4. Résolu
-        write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "Résolu"}, "## Tableau Récapitulatif\n## Détail des Questions\n")
+        write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "Résolu"}, "## Summary Table\n## Question Details\n")
         is_valid, checklist, reasons = validate_phase_documents(
             tmpdir, current_phase_id, required_documents, questions_path
         )
@@ -92,9 +92,9 @@ def test_validate_document_structure():
     assert len(errors) == 0
 
     # Test sections manquantes pour BQO
-    errors = validate_document_structure("/path/to/01-bqo.md", "01-bqo.md", "## Tableau Récapitulatif\n")
+    errors = validate_document_structure("/path/to/01-bqo.md", "01-bqo.md", "## Summary Table\n")
     assert len(errors) == 1
-    assert "Détail des Questions" in errors[0]
+    assert "Question Details" in errors[0]
 
 def test_sync_services():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -161,7 +161,7 @@ def test_sync_questions_with_null_answer():
 
 
 def test_generated_docs_pass_structure_validator():
-    # Régression : le générateur émet des en-têtes décorés (## 📋 Tableau Récapitulatif) ;
+    # Régression : le générateur émet des en-têtes décorés (## 📋 Summary Table) ;
     # le validateur doit les reconnaître, sinon il bloque à tort tout BQO / registre de décisions.
     with tempfile.TemporaryDirectory() as tmpdir:
         bqo = os.path.join(tmpdir, "02-BQO-questions.md")
