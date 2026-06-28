@@ -212,14 +212,17 @@ def test_secondbrain_integration(monkeypatch):
         project_dir = os.path.join(tmpdir, "10-episodes", "projects", "effortless")
         os.makedirs(os.path.join(project_dir, "archives"))
         
-        # 1. Créer context.md factice
+        # 1. Créer context.md factice — `phase` porte un résumé Memory Kit (une ligne)
+        # que la symbiose ne doit PAS écraser.
         context_path = os.path.join(project_dir, "context.md")
+        mk_phase_summary = "Cadrage du moteur de purge"
+        original_body = "## 🚦 Current Phase\n- Résumé Memory Kit à préserver.\n"
         write_markdown_frontmatter(
             context_path,
-            {"project": "effortless", "phase": "O-analyse", "last-session": "2026-06-27"},
-            "## 🚦 Current Phase\n- **O-analyse** : Analyse en cours.\n"
+            {"project": "effortless", "phase": mk_phase_summary, "last-session": "2026-06-27"},
+            original_body
         )
-        
+
         # 2. Créer history.md factice
         history_path = os.path.join(project_dir, "history.md")
         write_markdown_frontmatter(
@@ -227,14 +230,20 @@ def test_secondbrain_integration(monkeypatch):
             {"project": "effortless"},
             "# Effortless — Historique des sessions\n\n_(no sessions yet)\n"
         )
-        
-        # Tester sync_phase_to_secondbrain
+
+        # Tester sync_phase_to_secondbrain : NON-DESTRUCTIF.
         success = sync_phase_to_secondbrain("effortless", "E-execute")
         assert success
-        
+
         metadata, content = parse_markdown_frontmatter(context_path)
-        assert metadata["phase"] == "E-execute"
-        assert "E-execute" in content
+        # Champs Memory Kit préservés
+        assert metadata["phase"] == mk_phase_summary
+        assert metadata["last-session"] == "2026-06-27"
+        # Effortless écrit ses champs namespacés
+        assert metadata["effortless_phase"] == "E-execute"
+        assert "effortless_last_sync" in metadata
+        # Le corps n'est pas réécrit
+        assert "Résumé Memory Kit à préserver." in content
         
         # Tester create_secondbrain_archive
         archive_name = create_secondbrain_archive("effortless", "Test subject", "# Content test")

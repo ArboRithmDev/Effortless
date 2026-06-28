@@ -46,17 +46,15 @@ def sync_phase_to_secondbrain(project_slug: str, phase_id: str) -> bool:
 
     try:
         metadata, content = parse_markdown_frontmatter(context_path)
-        metadata["phase"] = phase_id
-        metadata["last-session"] = datetime.now().strftime("%Y-%m-%d")
-        
-        # Mettre à jour également dans le corps Markdown si mentionné
-        # Par exemple, remplacer la section ## 🚦 Current Phase
-        phase_pattern = re.compile(r"(## 🚦 Current Phase\n- \*\*[^\*]+\*\* : [^\n]+)", re.DOTALL)
-        new_phase_text = f"## 🚦 Current Phase\n- **{phase_id}** : Phase en cours mise à jour par Effortless."
-        
-        if phase_pattern.search(content):
-            content = phase_pattern.sub(new_phase_text, content)
-        
+
+        # NON-DESTRUCTIF / COMPLÉMENTAIRE : Effortless n'écrit QUE ses propres champs
+        # namespacés et ne touche à AUCUN champ géré par Memory Kit. En particulier il ne
+        # touche pas `phase` (résumé d'une ligne lu par mem_recall) ni `last-session`, qui
+        # ont une sémantique Memory Kit ; les écraser détruirait des données du vault.
+        # Le corps Markdown appartient à Memory Kit : on ne le réécrit pas.
+        metadata["effortless_phase"] = phase_id
+        metadata["effortless_last_sync"] = datetime.now().strftime("%Y-%m-%d")
+
         write_markdown_frontmatter(context_path, metadata, content)
         return True
     except Exception:
