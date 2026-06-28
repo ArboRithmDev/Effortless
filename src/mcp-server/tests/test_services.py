@@ -526,8 +526,3 @@ def test_loop_plan_delegation_branches(monkeypatch):
             assert _json.load(f)["step"] == "Implementation"
         with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:
             assert _json.load(f)["status"] == "Doing"
-
-
-
-
-
