@@ -2,6 +2,26 @@ import os
 from typing import List, Dict, Any
 from effortless_mcp.services.markdown import write_markdown_frontmatter
 
+# Bannière insérée en tête des fichiers Markdown générés : ils sont rendus depuis la
+# base JSON (.effortless/) à chaque mutation. Toute édition manuelle serait écrasée.
+GENERATED_BANNER = (
+    "> ⚠️ **Fichier généré automatiquement par Effortless** — ne pas éditer à la main.\n"
+    "> La source de vérité est la base `.effortless/`. Toute modification ici sera écrasée.\n\n"
+)
+
+
+def _cell(value: Any) -> str:
+    """Neutralise un texte libre pour une cellule de tableau Markdown : échappe les
+    pipes et aplatit les sauts de ligne, qui casseraient sinon la table."""
+    text = "" if value is None else str(value)
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
+
+
+def _inline(value: Any) -> str:
+    """Aplatit les sauts de ligne pour une interpolation inline (titres, etc.)."""
+    text = "" if value is None else str(value)
+    return text.replace("\r", " ").replace("\n", " ").strip()
+
 def sync_decisions_to_markdown(
     markdown_path: str,
     phase_id: str,
@@ -11,6 +31,7 @@ def sync_decisions_to_markdown(
     Génère le fichier Markdown du registre de décisions à partir du tableau JSON.
     """
     content = "# 🗃️ Registre de Décisions (ADR)\n\n"
+    content += GENERATED_BANNER
     content += "Ce document récapitule les décisions de conception et d'architecture arrêtées.\n\n"
     content += "---\n\n## 🏛️ Liste des Décisions\n\n"
 
@@ -18,7 +39,7 @@ def sync_decisions_to_markdown(
         content += "*Aucune décision enregistrée pour le moment.*\n"
     else:
         for idx, dec in enumerate(decisions, 1):
-            content += f"### {idx}. `{dec['id']}` : {dec['title']}\n"
+            content += f"### {idx}. `{dec['id']}` : {_inline(dec['title'])}\n"
             content += f"* **Statut** : {dec.get('status', 'Accepted')}\n"
             content += f"* **Date** : {dec.get('date', '')}\n"
             content += f"* **Phase** : {dec.get('phase', '')}\n"
@@ -61,6 +82,7 @@ def sync_questions_to_markdown(
         statut_global = "Résolu"  # Pas de question = résolu par défaut
 
     content = f"# ❓ BQO -- Phase {phase_id} -- {project_name}\n\n"
+    content += GENERATED_BANNER
     content += f"**Projet** : {project_name}  \n"
     content += f"**Phase** : {phase_id}  \n"
     content += f"**Statut** : {statut_global}  \n\n"
@@ -76,10 +98,10 @@ def sync_questions_to_markdown(
     else:
         for q in questions:
             statut_fr = "Résolu" if q.get("status") == "Resolved" else "En attente"
-            answer_summary = q.get("answer", "")
+            answer_summary = q.get("answer") or ""
             if len(answer_summary) > 30:
                 answer_summary = answer_summary[:27] + "..."
-            content += f"| {q['id']} | {q['question']} | {q.get('impact', 'Structuring')} | {statut_fr} | Moyenne | {answer_summary or '-'} |\n"
+            content += f"| {q['id']} | {_cell(q['question'])} | {_cell(q.get('impact', 'Structuring'))} | {statut_fr} | Moyenne | {_cell(answer_summary) or '-'} |\n"
         content += "\n"
 
     content += "---\n\n## 💬 Détail des Questions\n\n"
@@ -89,7 +111,7 @@ def sync_questions_to_markdown(
     else:
         for q in questions:
             statut_fr = "Résolu" if q.get("status") == "Resolved" else "En attente"
-            content += f"### {q['id']} : {q['question']}\n"
+            content += f"### {q['id']} : {_inline(q['question'])}\n"
             content += f"* **Contexte** : {q.get('context', '')}\n"
             content += f"* **Impact** : **{q.get('impact', 'Structuring')}**\n"
             

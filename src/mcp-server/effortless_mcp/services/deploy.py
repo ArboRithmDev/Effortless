@@ -70,9 +70,13 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
     localiser le projet : la plupart des clients ne fixent pas le cwd sur la racine).
     """
     results = []
-    source_skill = os.path.join(project_root, "skills", "effortless", "SKILL.md")
+    # Le Skill et le binaire MCP vivent dans l'INSTALLATION Effortless (venv), pas dans le
+    # projet cible. project_root ne sert qu'à pointer les DONNÉES (env EFFORTLESS_PROJECT_ROOT).
+    from effortless_mcp.server import get_install_root
+    install_root = get_install_root()
+    source_skill = os.path.join(install_root, "skills", "effortless", "SKILL.md")
     mcp_cmd = os.path.join(
-        project_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
+        install_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
     )
     # Entrée MCP commune aux clients JSON.
     json_entry = {

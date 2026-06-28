@@ -13,15 +13,17 @@ def parse_markdown_frontmatter(file_path: str) -> Tuple[Dict[str, Any], str]:
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
 
-    # Recherche du frontmatter YAML entre les marqueurs --- au tout début du fichier
-    pattern = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
+    # Recherche du frontmatter YAML entre les marqueurs --- au tout début du fichier.
+    # Le saut de ligne après le --- de fermeture est optionnel (fichier frontmatter-only
+    # ou éditeur qui retire le \n final) : le corps est alors vide.
+    pattern = re.compile(r"^---\s*\n(.*?)\n---[ \t]*(?:\n(.*))?$", re.DOTALL)
     match = pattern.match(text)
 
     if not match:
         return {}, text
 
     yaml_text = match.group(1)
-    content = match.group(2)
+    content = match.group(2) or ""
 
     try:
         metadata = yaml.safe_load(yaml_text) or {}
@@ -34,8 +36,10 @@ def write_markdown_frontmatter(file_path: str, metadata: Dict[str, Any], content
     """
     Écrit un fichier Markdown avec le Frontmatter YAML fourni et le reste du contenu.
     """
-    # Nettoyer le contenu pour éviter d'avoir plusieurs blocs de frontmatter dupliqués
-    content_clean = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL).strip()
+    # Le contenu fourni par les appelants est déjà sans frontmatter ; on se contente de
+    # normaliser les bords. (Ne PAS retirer un bloc `---...---` en tête : un corps Markdown
+    # peut légitimement commencer par une règle horizontale, ce qui causait une perte de données.)
+    content_clean = content.strip()
 
     yaml_text = yaml.safe_dump(metadata, default_flow_style=False, allow_unicode=True)
     

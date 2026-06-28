@@ -71,17 +71,23 @@ def install_git_pre_commit_hook(project_root: str) -> str:
         os.makedirs(hooks_dir, exist_ok=True)
         
     hook_path = os.path.join(hooks_dir, "pre-commit")
-    
+
+    # Le venv et le CLI vivent dans l'INSTALLATION Effortless, PAS dans le projet cible
+    # (promesse agnostique : un repo migré n'a pas src/mcp-server). On bake donc les chemins
+    # absolus de l'install. Le CLI déduit le projet à valider via son cwd = repo en cours de commit.
+    from effortless_mcp.server import get_install_root
+    install_root = get_install_root()
+    install_python = os.path.join(install_root, "src", "mcp-server", ".venv", "bin", "python")
+    install_cli = os.path.join(install_root, "src", "cli", "main.py")
+
     hook_content = f"""#!/bin/bash
 # Hook de pre-commit installé par Effortless pour détecter les dérives de développement (drift)
 
 echo -e "\\033[0;34m[Effortless] Analyse anti-drift avant commit...\\033[0m"
 
-# Résoudre la racine du dépôt dynamiquement (résiste à un déplacement du projet)
-REPO="$(git rev-parse --show-toplevel)"
-
-# Appeler le validateur CLI en mode drift-check strict
-"$REPO/src/mcp-server/.venv/bin/python" "$REPO/src/cli/main.py" --drift-check-strict
+# Validateur Effortless (interpréteur + CLI résolus dans l'installation Effortless).
+# Le drift est évalué sur le dépôt courant (cwd du hook = racine du repo commité).
+"{install_python}" "{install_cli}" --drift-check-strict
 
 EXIT_CODE=$?
 

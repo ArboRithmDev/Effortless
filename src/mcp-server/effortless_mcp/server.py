@@ -1,6 +1,7 @@
 import os
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 import socket
 import threading
 import webbrowser
@@ -37,6 +38,47 @@ def get_project_root() -> str:
     le serveur avec le cwd positionné sur la racine du projet. Repli sur le cwd.
     """
     return os.environ.get("EFFORTLESS_PROJECT_ROOT") or os.getcwd()
+
+def get_install_root() -> str:
+    """Racine de l'INSTALLATION Effortless (code, venv, Web UI), distincte de la racine
+    du PROJET utilisateur (données dans .effortless/, docs dans cadrage/).
+
+    server.py vit dans <install>/src/mcp-server/effortless_mcp/server.py : on remonte de
+    trois niveaux. Indispensable pour le déploiement agnostique (le venv/CLI/dist ne sont
+    pas dans le projet cible)."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+def _utc_now_iso() -> str:
+    """Horodatage ISO 8601 en UTC, timezone-aware (remplace datetime.utcnow() déprécié)."""
+    return datetime.now(timezone.utc).isoformat()
+
+def _today_iso() -> str:
+    """Date du jour (UTC) au format AAAA-MM-JJ."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+def next_sequential_id(existing_ids: List[str], prefix: str, width: int = 2) -> str:
+    """Prochain ID = max(suffixe numérique existant pour ce préfixe) + 1.
+
+    Robuste aux suppressions/fusions de fichiers (contrairement à len()+1 qui réutilise
+    un ID après suppression et écrase silencieusement le fichier existant)."""
+    max_n = 0
+    plen = len(prefix)
+    for eid in existing_ids:
+        if isinstance(eid, str) and eid.startswith(prefix):
+            suffix = eid[plen:]
+            if suffix.isdigit():
+                max_n = max(max_n, int(suffix))
+    return f"{prefix}{max_n + 1:0{width}d}"
+
+def resolve_phase_docs_dir(phase_cfg: Optional[Dict[str, Any]], fallback: str) -> str:
+    """Répertoire des documents de la phase active, déduit de ses required_documents
+    (pour ne pas écrire dans une mauvaise génération, ex. cadrage/Phase-003 codé en dur)."""
+    if phase_cfg:
+        for doc in phase_cfg.get("required_documents", []):
+            d = os.path.dirname(doc)
+            if d:
+                return d
+    return fallback
 
 def get_paths(root: str) -> Dict[str, str]:
     """Retourne tous les chemins de fichiers clés pour un projet."""
@@ -172,7 +214,7 @@ def effortless_init(
     state = ProjectState(
         project_name=name,
         current_phase="O-analyse",
-        started_at=datetime.utcnow().isoformat() + "Z"
+        started_at=_utc_now_iso()
     )
     with open(paths["state"], "w", encoding="utf-8") as f:
         json.dump(state.model_dump(), f, indent=2, ensure_ascii=False)
@@ -297,15 +339,24 @@ def effortless_phase_next() -> str:
 
     # Effectuer la transition
     next_phase = phases_list[current_idx + 1]
-    
-    state_data.setdefault("completed_phases", []).append({
-        "id": current_phase_id,
-        "completed_at": datetime.utcnow().isoformat() + "Z"
-    })
+
+    # Dédup : ne pas ré-empiler une phase déjà marquée terminée.
+    completed = state_data.setdefault("completed_phases", [])
+    if not any(cp.get("id") == current_phase_id for cp in completed):
+        completed.append({
+            "id": current_phase_id,
+            "completed_at": _utc_now_iso()
+        })
     state_data["current_phase"] = next_phase["id"]
 
     with open(paths["state"], "w", encoding="utf-8") as f:
         json.dump(state_data, f, indent=2, ensure_ascii=False)
+
+    # C3 : garder effortless.json en phase avec state.json (sinon le config conserve une
+    # phase morte que les consommateurs externes — Web UI — afficheraient à tort).
+    config_data.setdefault("workflow", {})["current_phase"] = next_phase["id"]
+    with open(paths["config"], "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
 
     # --- Symbiose SecondBrain ---
     project_slug = state_data.get("project_name", "effortless").lower()
@@ -350,7 +401,7 @@ def effortless_decision_add(
     root = get_project_root()
     paths = get_paths(root)
 
-    if not os.path.exists(paths["decisions"]) or not os.path.exists(paths["state"]):
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["decisions"]) or not os.path.exists(paths["state"]):
         return "Erreur : Projet non initialisé."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
@@ -359,15 +410,15 @@ def effortless_decision_add(
 
     decisions = load_entities(paths["decisions"])
 
-    # ID Séquentiel
-    dec_id = f"DEC-{len(decisions) + 1:02d}"
-    
+    # ID = max existant + 1 (robuste aux suppressions)
+    dec_id = next_sequential_id([d.get("id", "") for d in decisions], "DEC-")
+
     new_dec = Decision(
         id=dec_id,
         title=title,
         status="Accepted",
         phase=current_phase_id,
-        date=datetime.now().strftime("%Y-%m-%d"),
+        date=_today_iso(),
         context=context,
         decision=decision,
         consequences=consequences,
@@ -385,18 +436,18 @@ def effortless_decision_add(
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
     
-    docs_dir = config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001")
     # Rechercher s'il y a un document de type DEC requis dans la phase
     phases_list = config_data.get("workflow", {}).get("phases", [])
     current_phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
-    
+    docs_dir = resolve_phase_docs_dir(current_phase_cfg, config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001"))
+
     dec_doc_rel = None
     if current_phase_cfg:
         for doc in current_phase_cfg.get("required_documents", []):
             if "dec" in doc.lower() or "decision" in doc.lower():
                 dec_doc_rel = doc
                 break
-                
+
     if not dec_doc_rel:
         dec_doc_rel = f"{docs_dir}/03-MET-DEC-registre-decisions.md"
 
@@ -420,8 +471,12 @@ def effortless_question_ask(
     root = get_project_root()
     paths = get_paths(root)
 
-    if not os.path.exists(paths["questions"]) or not os.path.exists(paths["state"]):
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["questions"]) or not os.path.exists(paths["state"]):
         return "Erreur : Projet non initialisé."
+
+    # B8 : valider l'impact AVANT toute écriture (un 'blocker' mal casé contournait la barrière).
+    if impact not in ("Blocker", "Structuring", "Minor"):
+        return f"Erreur : impact invalide '{impact}'. Valeurs autorisées : Blocker, Structuring, Minor."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -430,9 +485,9 @@ def effortless_question_ask(
 
     questions = load_entities(paths["questions"])
 
-    # ID Séquentiel
-    q_id = f"Q-{len(questions) + 1:02d}"
-    
+    # ID = max existant + 1 (robuste aux suppressions)
+    q_id = next_sequential_id([q.get("id", "") for q in questions], "Q-")
+
     new_q = Question(
         id=q_id,
         phase=current_phase_id,
@@ -453,17 +508,17 @@ def effortless_question_ask(
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
     
-    docs_dir = config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001")
     phases_list = config_data.get("workflow", {}).get("phases", [])
     current_phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
-    
+    docs_dir = resolve_phase_docs_dir(current_phase_cfg, config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001"))
+
     bqo_doc_rel = None
     if current_phase_cfg:
         for doc in current_phase_cfg.get("required_documents", []):
             if "bqo" in doc.lower() or "question" in doc.lower():
                 bqo_doc_rel = doc
                 break
-                
+
     if not bqo_doc_rel:
         bqo_doc_rel = f"{docs_dir}/02-BQO-questions.md"
 
@@ -485,7 +540,7 @@ def effortless_question_resolve(
     root = get_project_root()
     paths = get_paths(root)
 
-    if not os.path.exists(paths["questions"]) or not os.path.exists(paths["state"]):
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["questions"]) or not os.path.exists(paths["state"]):
         return "Erreur : Projet non initialisé."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
@@ -500,7 +555,7 @@ def effortless_question_resolve(
 
     target_q["status"] = "Resolved"
     target_q["answer"] = answer
-    target_q["date_resolved"] = datetime.now().strftime("%Y-%m-%d")
+    target_q["date_resolved"] = _today_iso()
 
     # Sauvegarde JSON individuelle
     save_entity(paths["questions"], question_id, target_q)
@@ -511,10 +566,10 @@ def effortless_question_resolve(
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
     
-    docs_dir = config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001")
     phases_list = config_data.get("workflow", {}).get("phases", [])
     q_phase_cfg = next((p for p in phases_list if p["id"] == q_phase_id), None)
-    
+    docs_dir = resolve_phase_docs_dir(q_phase_cfg, config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001"))
+
     bqo_doc_rel = None
     if q_phase_cfg:
         for doc in q_phase_cfg.get("required_documents", []):
@@ -575,9 +630,10 @@ def effortless_task_add(
     else:
         prefix = "TSK"
 
-    # Compter les tâches déjà créées dans cette même phase pour calculer le nouvel index
-    phase_tasks = [t for t in tasks if t.get("phase") == current_phase_id]
-    tsk_id = f"TSK-{prefix}-{len(phase_tasks) + 1:02d}"
+    # ID = max existant pour CE préfixe + 1 : préfixe et index restent cohérents, et la
+    # suppression d'une tâche ne provoque ni réutilisation ni écrasement (B1/B5).
+    tsk_prefix = f"TSK-{prefix}-"
+    tsk_id = next_sequential_id([t.get("id", "") for t in tasks], tsk_prefix)
 
     new_task = Task(
         id=tsk_id,
@@ -709,8 +765,9 @@ def effortless_drift_check(strict: bool = False) -> str:
 
     if is_drifting:
         report += "\n⚠️ RÉSULTAT : DÉRIVE CONSTATÉE ! Du code source a été modifié sans tâche active associée."
-        if strict:
-            raise RuntimeError(report)
+        # R6 : un outil MCP doit renvoyer une str sur tous les chemins (pas raise). Le mode
+        # strict pour le hook git est géré par le CLI (main.py --drift-check-strict), qui
+        # appelle check_project_drift et mappe la dérive sur un code de sortie non nul.
     else:
         report += "\n✅ RÉSULTAT : CONFORME. Les modifications de code sont couvertes par les tâches actives."
 
@@ -754,12 +811,13 @@ def effortless_web_ui_launch() -> str:
     Démarre le serveur HTTP intégré pour servir le dashboard Web d'Effortless et l'ouvre dans le navigateur.
     """
     root = get_project_root()
-    web_ui_dist = os.path.join(root, "src", "web-ui", "dist")
+    # Le bundle Web UI vit dans l'installation Effortless, pas dans le projet utilisateur.
+    web_ui_dist = os.path.join(get_install_root(), "src", "web-ui", "dist")
 
     if not os.path.exists(web_ui_dist):
         return (
-            "⚠️ Le dossier de l'interface Web ('src/web-ui/dist') est introuvable.\n"
-            "Pour compiler le dashboard, veuillez exécuter :\n"
+            f"⚠️ Le dashboard compilé est introuvable ({web_ui_dist}).\n"
+            "Pour le compiler, depuis l'installation Effortless :\n"
             "  cd src/web-ui && npm install && npm run build"
         )
 

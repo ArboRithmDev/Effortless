@@ -12,8 +12,10 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
     """
     errors = []
     
-    # 1. Vérification des placeholders
-    placeholders = [r"\.\.\.", r"\[insérer", r"TODO", r"FIXME", r"<insérer"]
+    # 1. Vérification des placeholders.
+    # On exige des formes sentinelles explicites (crochets/chevrons) — un « ... » nu en
+    # prose ou dans un extrait de code (def f(...)) est légitime et ne doit PAS bloquer.
+    placeholders = [r"\[\.\.\.\]", r"\[à compléter\]", r"\[insérer", r"<insérer", r"\bTODO\b", r"\bFIXME\b", r"\bXXX\b"]
     for pattern in placeholders:
         if re.search(pattern, content, re.IGNORECASE):
             # Ignorer le glossaire qui peut légitimement lister ces termes
@@ -169,8 +171,8 @@ def validate_phase_documents(
             for q in questions:
                 if (
                     q.get("phase") == current_phase_id
-                    and q.get("impact") == "Blocker"
-                    and q.get("status") in ["Pending", "En attente"]
+                    and str(q.get("impact", "")).lower() == "blocker"
+                    and q.get("status") not in ["Resolved", "Résolu"]
                 ):
                     blocking_reasons.append(f"Question bloquante non résolue : {q.get('id')} - {q.get('question')}")
                     is_valid = False

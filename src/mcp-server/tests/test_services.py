@@ -145,6 +145,21 @@ def test_sync_services():
         assert "Question ?" in content
         assert "Answer" in content
 
+def test_sync_questions_with_null_answer():
+    # Régression : une question fraîche a answer=None ; sync_questions_to_markdown
+    # ne doit pas planter sur len(None).
+    with tempfile.TemporaryDirectory() as tmpdir:
+        questions_path = os.path.join(tmpdir, "bqo.md")
+        questions = [
+            {"id": "Q-01", "question": "Pourquoi ?", "status": "Pending",
+             "impact": "Blocker", "context": "ctx", "suggestion": "s", "answer": None}
+        ]
+        sync_questions_to_markdown(questions_path, "O-analyse", "Proj", questions)
+        assert os.path.exists(questions_path)
+        _, content = parse_markdown_frontmatter(questions_path)
+        assert "Q-01" in content
+
+
 def test_load_questions_from_directory():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Créer des questions individuelles
@@ -272,14 +287,14 @@ def test_deploy_to_mcp_clients(monkeypatch):
         assert any(r["name"] == "GitHub Copilot" and r["status"] == "success" for r in results)
 
         # Le serveur MCP doit être DÉCLARÉ (pas seulement le Skill copié) sur les
-        # clients JSON, avec l'env EFFORTLESS_PROJECT_ROOT pointant le projet.
-        expected_cmd = os.path.join(tmpdir, "src", "mcp-server", ".venv", "bin", "effortless-mcp")
+        # clients JSON. La commande pointe le binaire de l'INSTALLATION Effortless, et
+        # l'env EFFORTLESS_PROJECT_ROOT pointe les DONNÉES du projet (= tmpdir ici).
 
         # Claude Code -> ~/.claude.json
         with open(os.path.join(tmpdir, ".claude.json"), encoding="utf-8") as f:
             cc = json.load(f)
         entry = cc["mcpServers"]["effortless"]
-        assert entry["command"] == expected_cmd
+        assert entry["command"].endswith(os.path.join(".venv", "bin", "effortless-mcp"))
         assert entry["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
 
         # GitHub Copilot -> ~/.copilot/mcp-config.json
@@ -308,6 +323,42 @@ def test_deploy_to_mcp_clients(monkeypatch):
             assert f.read().count("[mcp_servers.effortless]") == 1
         with open(os.path.join(tmpdir, ".claude.json"), encoding="utf-8") as f:
             assert len(json.load(f)["mcpServers"]) == 1
+
+
+def test_next_sequential_id_is_max_plus_one():
+    from effortless_mcp.server import next_sequential_id
+    # max+1, pas count+1 : robuste aux suppressions.
+    assert next_sequential_id([], "DEC-") == "DEC-01"
+    assert next_sequential_id(["DEC-01", "DEC-02", "DEC-03"], "DEC-") == "DEC-04"
+    # DEC-02 supprimé : on ne réutilise pas DEC-03, on prend max+1 = DEC-04.
+    assert next_sequential_id(["DEC-01", "DEC-03"], "DEC-") == "DEC-04"
+    # Préfixe composite TSK : seuls les IDs du préfixe comptent.
+    ids = ["TSK-Phase-003-E-01", "TSK-Phase-003-E-07", "TSK-Phase-003-L-02"]
+    assert next_sequential_id(ids, "TSK-Phase-003-E-") == "TSK-Phase-003-E-08"
+
+
+def test_markdown_parse_without_trailing_newline():
+    # Régression B3 : un fichier frontmatter-only (pas de \n après le --- final) ne doit
+    # pas perdre son frontmatter.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = os.path.join(tmpdir, "fm.md")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("---\nphase: O-analyse\nstatut: Actif\n---")
+        meta, body = parse_markdown_frontmatter(p)
+        assert meta == {"phase": "O-analyse", "statut": "Actif"}
+        assert body == ""
+
+
+def test_write_frontmatter_preserves_leading_horizontal_rule():
+    # Régression B4 : un corps commençant par une règle horizontale --- ne doit pas être tronqué.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = os.path.join(tmpdir, "doc.md")
+        body = "---\nSection visuelle\n---\nVrai contenu"
+        write_markdown_frontmatter(p, {"phase": "X"}, body)
+        meta, parsed = parse_markdown_frontmatter(p)
+        assert meta == {"phase": "X"}
+        assert "Vrai contenu" in parsed
+        assert "Section visuelle" in parsed
 
 
 def test_task_update_returns_confirmation(monkeypatch):
