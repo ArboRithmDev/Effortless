@@ -48,22 +48,16 @@ uv pip install -e . pytest
 # Revenir à la racine
 cd "$PROJECT_ROOT" || exit 1
 
-# 3. Message de succès et configuration Claude Desktop
-echo -e "\n${GREEN}[✓] Installation terminée avec succès !${NC}"
-echo -e "${BLUE}============================================================${NC}"
-echo -e "${YELLOW}🔑 CONFIGURATION POUR CLAUDE DESKTOP :${NC}"
-echo -e "Pour ajouter Effortless à Claude Desktop, ajoutez le bloc suivant dans"
-echo -e "votre fichier de configuration ${YELLOW}~/Library/Application Support/Claude/claude_desktop_config.json${NC} :"
-echo ""
-echo -e "{"
-echo -e "  \"mcpServers\": {"
-echo -e "    \"effortless\": {"
-echo -e "      \"command\": \"$PROJECT_ROOT/src/mcp-server/.venv/bin/effortless-mcp\","
-echo -e "      \"cwd\": \"$PROJECT_ROOT\""
-echo -e "    }"
-echo -e "  }"
-echo -e "}"
-echo ""
+# 3. Déploiement automatique multi-CLI / multi-App
+echo -e "\n${BLUE}[2/3] Déploiement automatique sur les clients MCP détectés...${NC}"
+"$PROJECT_ROOT/src/mcp-server/.venv/bin/python" -c "from effortless_mcp.server import effortless_deploy; print(effortless_deploy())"
+
+# 4. Installation du hook Git pre-commit
+echo -e "\n${BLUE}[3/3] Installation du hook Git pre-commit anti-drift...${NC}"
+"$PROJECT_ROOT/src/mcp-server/.venv/bin/python" -c "from effortless_mcp.server import effortless_drift_hook_install; print(effortless_drift_hook_install())"
+
+# 5. Message de succès
+echo -e "\n${GREEN}[✓] Installation, déploiement et sécurisation terminés avec succès !${NC}"
 echo -e "${BLUE}============================================================${NC}"
 echo -e "${YELLOW}🚀 COMMANDES DISPONIBLES :${NC}"
 echo -e "• Tester le serveur MCP localement :"
