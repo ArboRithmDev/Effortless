@@ -287,35 +287,35 @@ def test_deploy_to_mcp_clients(monkeypatch):
         assert any(r["name"] == "GitHub Copilot" and r["status"] == "success" for r in results)
 
         # Le serveur MCP doit être DÉCLARÉ (pas seulement le Skill copié) sur les
-        # clients JSON. La commande pointe le binaire de l'INSTALLATION Effortless, et
-        # l'env EFFORTLESS_PROJECT_ROOT pointe les DONNÉES du projet (= tmpdir ici).
+        # clients JSON. La commande pointe le binaire de l'INSTALLATION Effortless. Aucun
+        # pin EFFORTLESS_PROJECT_ROOT n'est déployé : le serveur suit le cwd (projet courant).
 
         # Claude Code -> ~/.claude.json
         with open(os.path.join(tmpdir, ".claude.json"), encoding="utf-8") as f:
             cc = json.load(f)
         entry = cc["mcpServers"]["effortless"]
         assert entry["command"].endswith(os.path.join(".venv", "bin", "effortless-mcp"))
-        assert entry["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
+        assert "EFFORTLESS_PROJECT_ROOT" not in entry.get("env", {})
 
         # GitHub Copilot -> ~/.copilot/mcp-config.json
         with open(os.path.join(tmpdir, ".copilot", "mcp-config.json"), encoding="utf-8") as f:
             cop = json.load(f)
-        assert cop["mcpServers"]["effortless"]["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
+        assert "EFFORTLESS_PROJECT_ROOT" not in cop["mcpServers"]["effortless"].get("env", {})
 
         # Antigravity (Gemini) -> ~/.gemini/settings.json
         with open(os.path.join(tmpdir, ".gemini", "settings.json"), encoding="utf-8") as f:
             gem = json.load(f)
-        assert gem["mcpServers"]["effortless"]["env"]["EFFORTLESS_PROJECT_ROOT"] == tmpdir
+        assert "EFFORTLESS_PROJECT_ROOT" not in gem["mcpServers"]["effortless"].get("env", {})
 
-        # Codex / Vibe -> bloc TOML idempotent avec env
+        # Codex / Vibe -> bloc TOML idempotent, sans pin de projet
         with open(os.path.join(tmpdir, ".codex", "config.toml"), encoding="utf-8") as f:
             codex_toml = f.read()
         assert "[mcp_servers.effortless]" in codex_toml
-        assert "EFFORTLESS_PROJECT_ROOT" in codex_toml
+        assert "EFFORTLESS_PROJECT_ROOT" not in codex_toml
 
         with open(os.path.join(tmpdir, ".vibe", "config.toml"), encoding="utf-8") as f:
             vibe_toml = f.read()
-        assert "EFFORTLESS_PROJECT_ROOT" in vibe_toml
+        assert "EFFORTLESS_PROJECT_ROOT" not in vibe_toml
 
         # Idempotence : un second déploiement ne duplique pas l'entrée.
         deploy_to_mcp_clients(tmpdir)

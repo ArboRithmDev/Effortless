@@ -78,11 +78,12 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
     mcp_cmd = os.path.join(
         install_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
     )
-    # Entrée MCP commune aux clients JSON.
+    # Entrée MCP commune aux clients JSON. Pas de pin EFFORTLESS_PROJECT_ROOT : le serveur
+    # suit le cwd du client (= le projet courant), comportement agnostique attendu. Le hook
+    # CLI et les power-users peuvent toujours forcer la cible via la variable d'env.
     json_entry = {
         "command": mcp_cmd,
         "args": [],
-        "env": {"EFFORTLESS_PROJECT_ROOT": project_root},
     }
 
     # 1. Claude Desktop
@@ -171,7 +172,6 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
             "[mcp_servers.effortless]\n"
             f"command = '{mcp_cmd}'\n"
             "args = []\n"
-            f"env = {{ EFFORTLESS_PROJECT_ROOT = '{project_root}' }}\n"
         )
         try:
             inject_toml_block(toml_path, block)
@@ -213,7 +213,6 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
             "transport = \"stdio\"\n"
             f"command = \"{mcp_cmd}\"\n"
             "args = []\n"
-            f"env = {{ EFFORTLESS_PROJECT_ROOT = \"{project_root}\" }}\n"
         )
         try:
             inject_toml_block(toml_path, block)
