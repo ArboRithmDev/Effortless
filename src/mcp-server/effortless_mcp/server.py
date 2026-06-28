@@ -20,6 +20,9 @@ from effortless_mcp.services.sync import sync_decisions_to_markdown, sync_questi
 from effortless_mcp.services.secondbrain import sync_phase_to_secondbrain, create_secondbrain_archive, get_secondbrain_vault_path
 from effortless_mcp.services.drift import check_project_drift, install_git_pre_commit_hook
 from effortless_mcp.services.deploy import deploy_to_mcp_clients
+from effortless_mcp.services.repo_analyzer import analyze_target_repo
+from effortless_mcp.services.migration_planner import init_migration_project, apply_migration_project
+from effortless_mcp.services.session_loop import init_autonomous_loop, step_autonomous_loop
 
 
 
@@ -277,7 +280,7 @@ def effortless_phase_next() -> str:
     # Valider les barrières de la phase en cours
     phase_config = phases_list[current_idx]
     required_docs = phase_config.get("required_documents", [])
-    is_valid, _, blocking_reasons = validate_phase_documents(
+    is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
         current_phase_id=current_phase_id,
         required_documents=required_docs,
@@ -778,6 +781,54 @@ def effortless_web_ui_launch() -> str:
     webbrowser.open(url)
 
     return f"Dashboard démarré à l'adresse {url} et ouvert dans votre navigateur par défaut."
+
+
+@mcp.tool()
+def effortless_migrate_init(target_path: str) -> str:
+    """
+    Analyse un projet cible existant et l'initialise pour Effortless en générant les tâches de migration adaptées.
+    """
+    try:
+        analysis = analyze_target_repo(target_path)
+        report = init_migration_project(target_path, analysis)
+        
+        # Ajouter le diagnostic dans le rapport retourné
+        diagnostic = f"🔍 DIAGNOSTIC DE SÉCURITÉ DE MIGRATION POUR {target_path}\n"
+        diagnostic += f"- Stack détectée : {', '.join(analysis['stack'])}\n"
+        diagnostic += f"- Frameworks identifiés : {', '.join(analysis['frameworks']) or 'Aucun'}\n"
+        diagnostic += f"- Nombre de fichiers sources : {analysis['source_files_count']}\n"
+        diagnostic += f"- Fichiers de doc détectés : {len(analysis['docs_files'])}\n"
+        diagnostic += f"- Réorganisations proposées : {len(analysis['proposed_relocations'])}\n\n"
+        
+        return diagnostic + report
+    except Exception as e:
+        return f"Erreur lors de l'initialisation de la migration : {str(e)}"
+
+@mcp.tool()
+def effortless_migrate_apply(target_path: str) -> str:
+    """
+    Exécute physiquement les déplacements de réorganisation de dossiers de documentation et de codebase après validation.
+    """
+    try:
+        return apply_migration_project(target_path)
+    except Exception as e:
+        return f"Erreur lors de l'application de la migration : {str(e)}"
+
+@mcp.tool()
+def effortless_loop_init(goal: str) -> str:
+    """
+    Initialise une session de développement itératif autonome avec un objectif global spécifié.
+    """
+    root = get_project_root()
+    return init_autonomous_loop(root, goal)
+
+@mcp.tool()
+def effortless_loop_step(test_command: str) -> str:
+    """
+    Évalue et fait avancer la machine à états de la boucle itérative autonome en lançant la recette et la validation.
+    """
+    root = get_project_root()
+    return step_autonomous_loop(root, test_command)
 
 
 # Point d'entrée pour exécuter le serveur

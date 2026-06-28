@@ -8,6 +8,9 @@ from effortless_mcp.services.sync import sync_decisions_to_markdown, sync_questi
 from effortless_mcp.services.secondbrain import sync_phase_to_secondbrain, create_secondbrain_archive, get_secondbrain_vault_path
 from effortless_mcp.services.drift import check_project_drift, install_git_pre_commit_hook
 from effortless_mcp.services.deploy import deploy_to_mcp_clients
+from effortless_mcp.services.repo_analyzer import analyze_target_repo
+from effortless_mcp.services.migration_planner import init_migration_project, apply_migration_project
+from effortless_mcp.services.session_loop import init_autonomous_loop, step_autonomous_loop
 
 
 
@@ -261,6 +264,69 @@ def test_deploy_to_mcp_clients(monkeypatch):
         # Vérifier que les fichiers ont été copiés/écrits
         assert any(r["name"] == "Antigravity CLI" and r["status"] == "success" for r in results)
         assert any(r["name"] == "Claude Code" and r["status"] == "success" for r in results)
+
+def test_repo_analyzer_and_migration_planner(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Créer des fichiers simulant un dépôt existant
+        with open(os.path.join(tmpdir, "pyproject.toml"), "w") as f:
+            f.write("[tool.poetry]\nname = 'test-project'\n")
+        with open(os.path.join(tmpdir, "README.md"), "w") as f:
+            f.write("# Test Project\n")
+        with open(os.path.join(tmpdir, "old_doc.md"), "w") as f:
+            f.write("# Old documentation\n")
+        
+        src_dir = os.path.join(tmpdir, "my_source_folder")
+        os.makedirs(src_dir)
+        with open(os.path.join(src_dir, "app.py"), "w") as f:
+            f.write("print('hello')\n")
+            
+        # Tester l'analyseur
+        analysis = analyze_target_repo(tmpdir)
+        assert "Python" in analysis["stack"]
+        assert len(analysis["proposed_relocations"]) > 0
+        
+        # Tester l'initialisation
+        report = init_migration_project(tmpdir, analysis)
+        assert "initialisé" in report
+        assert os.path.exists(os.path.join(tmpdir, "effortless.json"))
+        assert os.path.exists(os.path.join(tmpdir, ".effortless", "tasks", "TSK-M-01.json"))
+        
+        # Tester l'application de la migration
+        apply_report = apply_migration_project(tmpdir)
+        assert "Migration appliquée" in apply_report
+        assert os.path.exists(os.path.join(tmpdir, "cadrage", "Phase-001", "01-MIG-old_doc.md"))
+        assert os.path.exists(os.path.join(tmpdir, "src", "my_source_folder", "app.py"))
+
+def test_autonomous_loop_lifecycle(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Mock de get_project_root pour pointer sur tmpdir
+        monkeypatch.setattr("effortless_mcp.server.save_entity", lambda d, i, e: None)
+        
+        # 1. Initialisation
+        init_report = init_autonomous_loop(tmpdir, "Complete tests")
+        assert "initialisée" in init_report
+        
+        # Initialiser le dossier de tâches
+        tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
+        os.makedirs(tasks_dir)
+        
+        # Écrire une tâche Todo
+        t1 = {"id": "TSK-001", "status": "Todo", "title": "Implement auth", "phase": "E-execute"}
+        with open(os.path.join(tasks_dir, "TSK-001.json"), "w") as f:
+            json.dump(t1, f)
+            
+        # Étape 1 : Plan
+        step_report = step_autonomous_loop(tmpdir, "true")
+        assert "PLAN" in step_report
+        
+        # Étape 2 : Lancer la boucle en Implementation
+        # (doit passer à Recette et exécuter les tests)
+        monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: type("Res", (), {"returncode": 0, "stdout": "All tests passed", "stderr": ""})())
+        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: [])
+        
+        step_report_2 = step_autonomous_loop(tmpdir, "true")
+        assert "LIVRAISON" in step_report_2
+
 
 
 
