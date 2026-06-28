@@ -160,6 +160,30 @@ def test_sync_questions_with_null_answer():
         assert "Q-01" in content
 
 
+def test_generated_docs_pass_structure_validator():
+    # Régression : le générateur émet des en-têtes décorés (## 📋 Tableau Récapitulatif) ;
+    # le validateur doit les reconnaître, sinon il bloque à tort tout BQO / registre de décisions.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bqo = os.path.join(tmpdir, "02-BQO-questions.md")
+        sync_questions_to_markdown(bqo, "O-analyse", "Proj", [
+            {"id": "Q-01", "question": "Quand purger Qt ?", "status": "Pending",
+             "impact": "Blocker", "context": "c", "suggestion": "s", "answer": None}
+        ])
+        _, bqo_body = parse_markdown_frontmatter(bqo)
+        errs = validate_document_structure(bqo, "02-BQO-questions.md", bqo_body)
+        assert not any("manquante" in e for e in errs), errs
+
+        dec = os.path.join(tmpdir, "03-MET-DEC-registre-decisions.md")
+        sync_decisions_to_markdown(dec, "O-analyse", [
+            {"id": "DEC-01", "title": "X", "status": "Accepted", "phase": "O-analyse",
+             "date": "2026-06-28", "context": "c", "decision": "d",
+             "consequences": ["a"], "rejected_alternatives": []}
+        ])
+        _, dec_body = parse_markdown_frontmatter(dec)
+        errs2 = validate_document_structure(dec, "03-MET-DEC-registre-decisions.md", dec_body)
+        assert not any("manquante" in e for e in errs2), errs2
+
+
 def test_load_questions_from_directory():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Créer des questions individuelles

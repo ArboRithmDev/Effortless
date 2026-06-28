@@ -4,6 +4,17 @@ import re
 from typing import Dict, List, Any, Tuple
 from effortless_mcp.services.markdown import parse_markdown_frontmatter
 
+
+def _has_h2_section(content: str, phrase: str) -> bool:
+    """Vrai si `content` contient un en-tête H2 (`## …`) incluant `phrase`, en tolérant
+    un emoji ou une décoration entre `##` et le texte.
+
+    Indispensable : le générateur (sync.py) émet des titres décorés
+    (`## 📋 Tableau Récapitulatif`) ; un simple substring `## tableau récapitulatif`
+    ne les reconnaîtrait pas et bloquerait à tort la barrière de phase."""
+    return re.search(r"(?mi)^\s*##\s+.*" + re.escape(phrase), content) is not None
+
+
 def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) -> List[str]:
     """
     Analyse la structure du document Markdown pour s'assurer que :
@@ -27,21 +38,21 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
     doc_lower = doc_rel_path.lower()
     
     if "bqo" in doc_lower or "questions" in doc_lower:
-        if "## tableau récapitulatif" not in content.lower():
+        if not _has_h2_section(content, "tableau récapitulatif"):
             errors.append("Section obligatoire manquante : '## Tableau Récapitulatif'")
-        if "## détail des questions" not in content.lower():
+        if not _has_h2_section(content, "détail des questions"):
             errors.append("Section obligatoire manquante : '## Détail des Questions'")
-            
+
     elif "dec" in doc_lower or "decision" in doc_lower:
-        if "## liste des décisions" not in content.lower():
+        if not _has_h2_section(content, "liste des décisions"):
             errors.append("Section obligatoire manquante : '## Liste des Décisions'")
-            
+
     elif "arc" in doc_lower or "architecture" in doc_lower:
-        if "## composants clés" not in content.lower():
+        if not _has_h2_section(content, "composants clés"):
             errors.append("Section obligatoire manquante : '## Composants Clés'")
-            
+
     elif "pln" in doc_lower or "plan" in doc_lower:
-        if "## découpage des tâches" not in content.lower():
+        if not _has_h2_section(content, "découpage des tâches"):
             errors.append("Section obligatoire manquante : '## Découpage des Tâches'")
             
     return errors
