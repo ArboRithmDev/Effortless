@@ -33,7 +33,7 @@ def init_autonomous_loop(repo_path: str, goal: str) -> str:
     }
     os.makedirs(os.path.dirname(loop_file), exist_ok=True)
     _save_loop_state(loop_file, state)
-    return f"Boucle autonome initialisée avec succès pour l'objectif : '{goal}'."
+    return f"Autonomous loop successfully initialized for goal: '{goal}'."
 
 
 def step_autonomous_loop(repo_path: str, test_command: str) -> str:
@@ -44,7 +44,7 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
 
     loop_file = os.path.join(repo_path, ".effortless", "loop_state.json")
     if not os.path.exists(loop_file):
-        return "Erreur : Boucle autonome non initialisée. Veuillez appeler effortless_loop_init."
+        return "Error: Autonomous loop not initialized. Please call effortless_loop_init."
 
     # R4 : lecture gardée — un loop_state.json corrompu donne un message clair plutôt qu'un crash.
     try:
@@ -52,8 +52,8 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
             loop_state = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         return (
-            f"Erreur : loop_state.json illisible ({e}). "
-            "Réinitialisez la boucle avec effortless_loop_init."
+            f"Error: loop_state.json unreadable ({e}). "
+            "Reset the loop with effortless_loop_init."
         )
 
     tasks_dir = os.path.join(repo_path, ".effortless", "tasks")
@@ -67,8 +67,8 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
         # R7 : distinguer « backlog vide » (rien à faire) de « tout terminé ».
         if not tasks:
             return (
-                "ℹ️ [PLAN] Aucune tâche dans le backlog (.effortless/tasks vide). "
-                "Ajoutez des tâches avec effortless_task_add avant de lancer la boucle."
+                "ℹ️ [PLAN] No tasks in the backlog (.effortless/tasks is empty). "
+                "Add tasks with effortless_task_add before starting the loop."
             )
 
         # B6 : ne sélectionner qu'une tâche Todo dont TOUTES les dépendances sont Done.
@@ -80,7 +80,7 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
             loop_state["step"] = "Finished"
             loop_state["current_task"] = None
             _save_loop_state(loop_file, loop_state)
-            return f"✅ OBJECTIF ATTEINT ! Toutes les tâches du backlog sont au statut 'Done'. L'objectif '{loop_state['goal']}' est rempli."
+            return f"✅ GOAL REACHED! All backlog tasks are at status 'Done'. Goal '{loop_state['goal']}' is complete."
 
         if not eligible:
             # Des tâches Todo restent mais aucune n'est démarrable : dépendances non satisfaites.
@@ -89,9 +89,9 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 for t in todo
             )
             return (
-                "⏳ [PLAN] Aucune tâche démarrable : toutes les tâches Todo restantes ont des "
-                f"dépendances non terminées.\nBloquées : {blocked}\n"
-                "👉 Terminez/réordonnez les dépendances, ou corrigez les depends_on."
+                "⏳ [PLAN] No startable task: all remaining Todo tasks have "
+                f"unfinished dependencies.\nBlocked: {blocked}\n"
+                "👉 Complete/reorder dependencies, or fix the depends_on values."
             )
 
         next_task = eligible[0]
@@ -100,18 +100,18 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
         complexity = next_task.get("complexity")
         if complexity is None:
             return (
-                f"🔎 [TRIAGE] Tâche {next_task['id']} : {next_task['title']} — non classée.\n"
-                "👉 Classe-la via effortless_task_classify(task_id, 'simple'|'complex'), "
-                "puis relance effortless_loop_step. (Critère : 'simple' = mécanique, sans "
-                "réflexion ; 'complex' = raisonnement/architecture/arbitrage.)"
+                f"🔎 [TRIAGE] Task {next_task['id']}: {next_task['title']} — unclassified.\n"
+                "👉 Classify it via effortless_task_classify(task_id, 'simple'|'complex'), "
+                "then re-run effortless_loop_step. (Rule: 'simple' = mechanical, no reasoning; "
+                "'complex' = reasoning/architecture/tradeoff.)"
             )
         if complexity == "complex":
             return (
-                f"🧩 [DÉCOMPOSER] Tâche complexe {next_task['id']} : {next_task['title']}.\n"
-                "👉 Découpe-la en sous-tâches SIMPLES via "
+                f"🧩 [DECOMPOSE] Complex task {next_task['id']}: {next_task['title']}.\n"
+                "👉 Break it down into SIMPLE sub-tasks via "
                 "effortless_task_add(title, complexity='simple', depends_on=[...]), "
-                f"puis marque {next_task['id']} 'Done' via effortless_task_update. "
-                "Relance ensuite effortless_loop_step."
+                f"then mark {next_task['id']} 'Done' via effortless_task_update. "
+                "Then re-run effortless_loop_step."
             )
         # complexity == "simple" : flux nominal d'exécution, délégation imposée.
 
@@ -125,12 +125,12 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
         _save_loop_state(loop_file, loop_state)
 
         return (
-            f"📋 [DÉLÉGUER] Tâche simple sélectionnée : **{next_task['id']}** : {next_task['title']}\n"
-            f"Statut de la boucle : **Implementation**\n"
-            "👉 Consigne : délègue cette tâche à un sous-agent (outil Agent), avec un prompt "
-            "fermé et borné ; récupère un résultat compact ; n'implémente PAS toi-même "
-            "(garde la conclusion, pas les détails). Une fois fait, relance effortless_loop_step "
-            "pour lancer la recette."
+            f"📋 [DELEGATE] Simple task selected: **{next_task['id']}**: {next_task['title']}\n"
+            f"Loop status: **Implementation**\n"
+            "👉 Instruction: delegate this task to a sub-agent (Agent tool), with a closed and "
+            "bounded prompt; retrieve a compact result; do NOT implement it yourself "
+            "(keep the conclusion, not the details). Once done, re-run effortless_loop_step "
+            "to start acceptance."
         )
 
     elif step == "Implementation" or step == "Correction":
@@ -162,9 +162,9 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 # B7 : commande introuvable. Erreur de configuration, NON corrigeable par
                 # itération de code → on n'incrémente pas le compteur, on reste en Recette.
                 return (
-                    "❌ [RECETTE] Commande de test introuvable (exit 127).\n"
-                    f"Commande : `{test_command}`\n"
-                    "👉 Corrigez le test_command (ex. activer le venv / chemin pytest) puis relancez."
+                    "❌ [ACCEPTANCE] Test command not found (exit 127).\n"
+                    f"Command: `{test_command}`\n"
+                    "👉 Fix the test_command (e.g. activate venv / check pytest path) and retry."
                 )
             elif rc != 0:
                 test_failed = True
@@ -172,12 +172,12 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
         except subprocess.TimeoutExpired:
             test_failed = True
             test_logs = (
-                f"Les tests ont dépassé le délai de {TEST_TIMEOUT_SECONDS}s "
-                "(blocage probable : attente stdin, serveur lancé, deadlock)."
+                f"Tests exceeded the {TEST_TIMEOUT_SECONDS}s timeout "
+                "(likely hang: stdin wait, server started, deadlock)."
             )
         except Exception as e:
             test_failed = True
-            test_logs = f"Impossible de lancer les tests : {str(e)}"
+            test_logs = f"Failed to run tests: {str(e)}"
 
         # 2. Vérifier la dérive (anti-drift)
         from effortless_mcp.services.drift import check_project_drift
@@ -200,19 +200,19 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 _save_loop_state(loop_file, loop_state)
 
                 return (
-                    f"❌ [BLOCAGE] La recette a échoué {MAX_CORRECTION_ATTEMPTS} fois consécutives pour la tâche {current_task_id}.\n"
-                    f"Arrêt de sécurité de la boucle autonome pour éviter la surconsommation de ressources.\n"
-                    f"Détails de l'erreur :\n```\n{test_logs[:1000]}\n```"
+                    f"❌ [BLOCKED] Acceptance failed {MAX_CORRECTION_ATTEMPTS} consecutive times for task {current_task_id}.\n"
+                    f"Safety stop of the autonomous loop to prevent resource overconsumption.\n"
+                    f"Error details:\n```\n{test_logs[:1000]}\n```"
                 )
             else:
                 loop_state["step"] = "Correction"
                 _save_loop_state(loop_file, loop_state)
 
-                drift_msg = "\n⚠️ Dérive détectée (modifs hors tâche active)." if is_drifting else ""
+                drift_msg = "\n⚠️ Drift detected (changes outside active task)." if is_drifting else ""
                 return (
-                    f"⚠️ [RECETTE] Échec de validation (Tentative {error_count}/{MAX_CORRECTION_ATTEMPTS}).{drift_msg}\n"
-                    f"Logs d'erreurs des tests :\n```\n{test_logs[:800]}\n```\n"
-                    f"👉 Consigne : Corrigez les erreurs signalées dans les tests puis relancez `effortless_loop_step`."
+                    f"⚠️ [ACCEPTANCE] Validation failed (Attempt {error_count}/{MAX_CORRECTION_ATTEMPTS}).{drift_msg}\n"
+                    f"Test error logs:\n```\n{test_logs[:800]}\n```\n"
+                    f"👉 Instruction: Fix the errors reported in the tests, then re-run `effortless_loop_step`."
                 )
         else:
             # Succès de recette -> Livraison & Passage à la tâche suivante
@@ -226,9 +226,9 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
             try:
                 subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
                 subprocess.run(["git", "commit", "-m", f"feat: complete task {current_task_id}"], cwd=repo_path, check=True)
-                git_msg = "Changements commités dans Git."
+                git_msg = "Changes committed to Git."
             except Exception as e:
-                git_msg = f"Impossible de commiter : {str(e)} (déjà commité ?)"
+                git_msg = f"Failed to commit: {str(e)} (already committed?)"
 
             # Repasser à l'étape Plan
             loop_state["step"] = "Plan"
@@ -237,18 +237,18 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
             _save_loop_state(loop_file, loop_state)
 
             return (
-                f"✅ [LIVRAISON] Tâche {current_task_id} validée et terminée avec succès !\n"
+                f"✅ [DELIVERY] Task {current_task_id} validated and completed successfully!\n"
                 f"{git_msg}\n"
-                f"👉 La boucle autonome repasse à l'étape Plan. Relancez `effortless_loop_step` pour la tâche suivante."
+                f"👉 The autonomous loop returns to the Plan step. Re-run `effortless_loop_step` for the next task."
             )
 
     elif step == "Finished":
-        return f"La boucle est déjà terminée avec succès pour l'objectif : '{loop_state['goal']}'."
+        return f"The loop has already completed successfully for goal: '{loop_state['goal']}'."
 
     elif step == "Aborted":
         return (
-            f"La boucle est actuellement bloquée/interrompue après {MAX_CORRECTION_ATTEMPTS} échecs de correction. "
-            "Veuillez corriger le bug manuellement, puis réinitialiser la boucle."
+            f"The loop is currently blocked/aborted after {MAX_CORRECTION_ATTEMPTS} correction failures. "
+            "Please fix the bug manually, then reset the loop."
         )
 
-    return f"État inconnu de la boucle : {step}"
+    return f"Unknown loop state: {step}"

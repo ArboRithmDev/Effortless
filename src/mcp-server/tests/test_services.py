@@ -71,7 +71,7 @@ def test_validate_phase_documents():
             tmpdir, current_phase_id, required_documents, questions_path
         )
         assert not is_valid
-        assert any("BQO non résolu" in r for r in reasons)
+        assert any("Unresolved BQO" in r for r in reasons)
 
         # 4. Résolu
         write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "Résolu"}, "## Tableau Récapitulatif\n## Détail des Questions\n")
@@ -140,7 +140,7 @@ def test_sync_services():
         
         metadata, content = parse_markdown_frontmatter(questions_path)
         assert metadata["phase"] == "O-analyse"
-        assert metadata["statut"] == "Résolu"
+        assert metadata["statut"] == "Resolved"
         assert "Q-01" in content
         assert "Question ?" in content
         assert "Answer" in content
@@ -434,17 +434,84 @@ def test_repo_analyzer_and_migration_planner(monkeypatch):
         assert "Python" in analysis["stack"]
         assert len(analysis["proposed_relocations"]) > 0
         
-        # Tester l'initialisation
-        report = init_migration_project(tmpdir, analysis)
-        assert "initialisé" in report
+        # dry-run par défaut : APERÇU non destructif, rien n'est écrit.
+        preview = init_migration_project(tmpdir, analysis)
+        assert "PREVIEW" in preview
+        assert not os.path.exists(os.path.join(tmpdir, "effortless.json"))
+        assert not os.path.exists(os.path.join(tmpdir, ".effortless"))
+
+        # Initialisation réelle (confirm) : scaffolde la config et les tâches.
+        report = init_migration_project(tmpdir, analysis, dry_run=False)
+        assert "initialised" in report
         assert os.path.exists(os.path.join(tmpdir, "effortless.json"))
         assert os.path.exists(os.path.join(tmpdir, ".effortless", "tasks", "TSK-M-01.json"))
-        
+
         # Tester l'application de la migration
         apply_report = apply_migration_project(tmpdir)
-        assert "Migration appliquée" in apply_report
-        assert os.path.exists(os.path.join(tmpdir, "cadrage", "Phase-001", "01-MIG-old_doc.md"))
+        assert "Migration applied" in apply_report
+        # Hiérarchie préservée : le doc racine atterrit sous migrated-docs/ (plus d'aplatissement 01-MIG-).
+        assert os.path.exists(os.path.join(tmpdir, "cadrage", "Phase-001", "migrated-docs", "old_doc.md"))
         assert os.path.exists(os.path.join(tmpdir, "src", "my_source_folder", "app.py"))
+
+
+def test_migrate_init_guardrail_and_dry_run(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "pyproject.toml"), "w") as f:
+            f.write("[tool.poetry]\nname = 'p'\n")
+        analysis = analyze_target_repo(tmpdir)
+
+        # 1. dry-run (défaut) n'écrit rien.
+        out = init_migration_project(tmpdir, analysis)
+        assert "PREVIEW" in out
+        assert not os.path.exists(os.path.join(tmpdir, "effortless.json"))
+
+        # 2. init réel.
+        init_migration_project(tmpdir, analysis, dry_run=False)
+        cfg_path = os.path.join(tmpdir, "effortless.json")
+        assert os.path.exists(cfg_path)
+        # Marqueur pour détecter un éventuel overwrite non sollicité.
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg_before = f.read()
+
+        # 3. Garde-fou : ré-init sans force est REFUSÉE et n'écrase rien.
+        refused = init_migration_project(tmpdir, analysis, dry_run=False)
+        assert "already initialised" in refused
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            assert f.read() == cfg_before  # config intacte
+
+        # 4. force=True : ré-init autorisée + sauvegarde .bak de l'existant.
+        forced = init_migration_project(tmpdir, analysis, dry_run=False, force=True)
+        assert "initialised" in forced
+        assert os.path.exists(cfg_path + ".bak")
+        assert os.path.exists(os.path.join(tmpdir, ".effortless.bak"))
+
+
+def test_migrate_preserves_doc_hierarchy_and_apply_dry_run(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "pyproject.toml"), "w") as f:
+            f.write("[tool.poetry]\nname = 'p'\n")
+        # Deux docs homonymes dans des sous-dossiers distincts : l'aplatissement les écrasait.
+        os.makedirs(os.path.join(tmpdir, "docs", "api"))
+        os.makedirs(os.path.join(tmpdir, "docs", "guide"))
+        with open(os.path.join(tmpdir, "docs", "api", "index.md"), "w") as f:
+            f.write("# API\n")
+        with open(os.path.join(tmpdir, "docs", "guide", "index.md"), "w") as f:
+            f.write("# Guide\n")
+
+        analysis = analyze_target_repo(tmpdir)
+        targets = [r["target"] for r in analysis["proposed_relocations"]]
+        # Hiérarchie préservée + pas de collision de basename.
+        assert "cadrage/Phase-001/migrated-docs/docs/api/index.md" in targets
+        assert "cadrage/Phase-001/migrated-docs/docs/guide/index.md" in targets
+        assert len(targets) == len(set(targets))
+
+        init_migration_project(tmpdir, analysis, dry_run=False)
+
+        # apply en dry-run : aucun déplacement, aucun rapport écrit.
+        preview = apply_migration_project(tmpdir, dry_run=True)
+        assert "dry-run" in preview
+        assert os.path.exists(os.path.join(tmpdir, "docs", "api", "index.md"))  # source non déplacée
+        assert not os.path.exists(os.path.join(tmpdir, "migration_report.md"))  # pas d'effet de bord
 
 def test_autonomous_loop_lifecycle(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -453,7 +520,7 @@ def test_autonomous_loop_lifecycle(monkeypatch):
 
         # 1. Initialisation
         init_report = init_autonomous_loop(tmpdir, "Complete tests")
-        assert "initialisée" in init_report
+        assert "initialized" in init_report
 
         # Initialiser le dossier de tâches
         tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
@@ -466,7 +533,7 @@ def test_autonomous_loop_lifecycle(monkeypatch):
 
         # Étape 1 : Plan
         step_report = step_autonomous_loop(tmpdir, "true")
-        assert "DÉLÉGUER" in step_report
+        assert "DELEGATE" in step_report
 
         # Étape 2 : Lancer la boucle en Implementation
         # (doit passer à Recette et exécuter les tests)
@@ -474,7 +541,7 @@ def test_autonomous_loop_lifecycle(monkeypatch):
         monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: [])
 
         step_report_2 = step_autonomous_loop(tmpdir, "true")
-        assert "LIVRAISON" in step_report_2
+        assert "DELIVERY" in step_report_2
 
 
 def test_task_add_stores_and_validates_complexity(monkeypatch):
@@ -485,20 +552,20 @@ def test_task_add_stores_and_validates_complexity(monkeypatch):
 
         # complexity valide stockée
         msg = server.effortless_task_add("T simple", complexity="simple")
-        tsk_id = msg.split("Tâche ")[1].split(" ")[0]
+        tsk_id = msg.split("Task ")[1].split(" ")[0]
         with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] == "simple"
 
         # absente => None
         msg2 = server.effortless_task_add("T sans")
-        tsk_id2 = msg2.split("Tâche ")[1].split(" ")[0]
+        tsk_id2 = msg2.split("Task ")[1].split(" ")[0]
         with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id2}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] is None
 
         # valeur invalide rejetée, pas d'écriture
         before = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
         bad = server.effortless_task_add("T bad", complexity="trivial")
-        assert "invalide" in bad
+        assert "invalid" in bad
         after = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
         assert before == after
 
@@ -509,7 +576,7 @@ def test_task_classify(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
         msg = server.effortless_task_add("T")
-        tsk_id = msg.split("Tâche ")[1].split(" ")[0]
+        tsk_id = msg.split("Task ")[1].split(" ")[0]
 
         # classification réussie
         ok = server.effortless_task_classify(tsk_id, "complex")
@@ -518,9 +585,9 @@ def test_task_classify(monkeypatch):
             assert json.load(f)["complexity"] == "complex"
 
         # valeur invalide
-        assert "invalide" in server.effortless_task_classify(tsk_id, "trivial")
+        assert "invalid" in server.effortless_task_classify(tsk_id, "trivial")
         # ID inconnu
-        assert "introuvable" in server.effortless_task_classify("TSK-X-99", "simple")
+        assert "not found" in server.effortless_task_classify("TSK-X-99", "simple")
 
 
 def test_loop_plan_delegation_branches(monkeypatch):
@@ -534,7 +601,7 @@ def test_loop_plan_delegation_branches(monkeypatch):
 
         def add(title, complexity=None):
             msg = server.effortless_task_add(title, complexity=complexity)
-            return msg.split("Tâche ")[1].split(" ")[0]
+            return msg.split("Task ")[1].split(" ")[0]
 
         # 1. Tâche non classée -> TRIAGE
         t_none = add("non classée")
@@ -547,14 +614,14 @@ def test_loop_plan_delegation_branches(monkeypatch):
         # 2. Classée complex -> DÉCOMPOSER
         server.effortless_task_classify(t_none, "complex")
         out2 = sl.step_autonomous_loop(tmpdir, "true")
-        assert "DÉCOMPOSER" in out2
+        assert "DECOMPOSE" in out2
         with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:
             assert _json.load(f)["status"] == "Todo"
 
         # 3. Classée simple -> DÉLÉGUER + Implementation
         server.effortless_task_classify(t_none, "simple")
         out3 = sl.step_autonomous_loop(tmpdir, "true")
-        assert "DÉLÉGUER" in out3
+        assert "DELEGATE" in out3
         with open(os.path.join(tmpdir, ".effortless", "loop_state.json"), encoding="utf-8") as f:
             assert _json.load(f)["step"] == "Implementation"
         with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:

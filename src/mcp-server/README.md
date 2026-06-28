@@ -1,16 +1,16 @@
 # Effortless MCP Server
 
-Ce dossier contient le serveur MCP pour le framework Effortless.
-Il est écrit en Python et utilise FastMCP.
+This folder contains the MCP server for the Effortless framework.
+It is written in Python and uses FastMCP.
 
-## Installation et Lancement
+## Installation and Launch
 
 ```bash
-# Initialiser et installer les dépendances avec uv
+# Initialise and install dependencies with uv
 uv venv
 source .venv/bin/activate
 uv pip install -e .
 
-# Lancer le serveur
+# Launch the server
 mcp-server-dev
 ```

@@ -8,7 +8,7 @@ def parse_markdown_frontmatter(file_path: str) -> Tuple[Dict[str, Any], str]:
     Lit un fichier Markdown et extrait le Frontmatter YAML et le reste du contenu.
     """
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Le fichier {file_path} n'existe pas.")
+        raise FileNotFoundError(f"File {file_path} does not exist.")
 
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
@@ -28,7 +28,7 @@ def parse_markdown_frontmatter(file_path: str) -> Tuple[Dict[str, Any], str]:
     try:
         metadata = yaml.safe_load(yaml_text) or {}
     except Exception as e:
-        raise ValueError(f"Erreur lors du parsing YAML du Frontmatter dans {file_path}: {e}")
+        raise ValueError(f"Error parsing YAML frontmatter in {file_path}: {e}")
 
     return metadata, content
 

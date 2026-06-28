@@ -8,7 +8,7 @@ def analyze_target_repo(repo_path: str) -> Dict[str, Any]:
     les documentations et propose une réorganisation.
     """
     if not os.path.exists(repo_path):
-        raise FileNotFoundError(f"Dépôt cible introuvable : {repo_path}")
+        raise FileNotFoundError(f"Target repository not found: {repo_path}")
 
     stack = []
     frameworks = []
@@ -77,14 +77,20 @@ def analyze_target_repo(repo_path: str) -> Dict[str, Any]:
     has_docs_folder = any(f.startswith(("docs/", "doc/", "wiki/")) for f in docs_files)
 
     relocations = []
-    # Suggestion de déplacements doc
+    # Suggestion de déplacements doc — préserver l'arborescence d'origine.
+    # Aplatir tous les .md sur leur basename (ancien comportement) écrasait les fichiers
+    # homonymes (chaque README.md/index.md imbriqué) et fondait 205 docs en un seul dossier.
+    # On reporte donc le chemin relatif complet sous une racine de migration documentaire.
+    DOC_MIGRATION_ROOT = "cadrage/Phase-001/migrated-docs"
     for doc in docs_files:
         if doc.lower() == "readme.md":
             continue
-        # Déplacer vers cadrage
+        # `doc` est déjà relatif au repo : on le normalise en POSIX et on le reporte
+        # tel quel pour conserver la hiérarchie (sous-dossiers) et éviter les collisions.
+        normalized = doc.replace(os.sep, "/")
         relocations.append({
             "source": doc,
-            "target": f"cadrage/Phase-001/01-MIG-{os.path.basename(doc)}"
+            "target": f"{DOC_MIGRATION_ROOT}/{normalized}"
         })
 
     # Suggestion de déplacements sources si pas de dossier src/
@@ -99,7 +105,7 @@ def analyze_target_repo(repo_path: str) -> Dict[str, Any]:
 
     return {
         "repo_path": repo_path,
-        "stack": stack or ["Inconnue"],
+        "stack": stack or ["Unknown"],
         "frameworks": frameworks,
         "docs_files": docs_files,
         "source_files_count": source_files_count,

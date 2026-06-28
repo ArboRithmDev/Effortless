@@ -83,7 +83,7 @@ def install_git_pre_commit_hook(project_root: str) -> str:
     hook_content = f"""#!/bin/bash
 # Hook de pre-commit installé par Effortless pour détecter les dérives de développement (drift)
 
-echo -e "\\033[0;34m[Effortless] Analyse anti-drift avant commit...\\033[0m"
+echo -e "\\033[0;34m[Effortless] Running anti-drift check before commit...\\033[0m"
 
 # Validateur Effortless (interpréteur + CLI résolus dans l'installation Effortless).
 # Le drift est évalué sur le dépôt courant (cwd du hook = racine du repo commité).
@@ -92,12 +92,12 @@ echo -e "\\033[0;34m[Effortless] Analyse anti-drift avant commit...\\033[0m"
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
-    echo -e "\\033[0;31m[Effortless] [ERROR] Commit bloqué : Vous avez des fichiers modifiés mais aucune tâche n'est active (statut 'Doing') dans le backlog.\\033[0m"
-    echo -e "Utilisez le CLI de test interactif pour passer la tâche correspondante en 'Doing' ou lancez git commit avec --no-verify si nécessaire."
+    echo -e "\\033[0;31m[Effortless] [ERROR] Commit blocked: you have modified files but no task is active (status 'Doing') in the backlog.\\033[0m"
+    echo -e "Use the interactive test CLI to set the relevant task to 'Doing', or run git commit with --no-verify if needed."
     exit 1
 fi
 
-echo -e "\\033[0;32m[Effortless] Aucun drift détecté. Validation pre-commit OK.\\033[0m"
+echo -e "\\033[0;32m[Effortless] No drift detected. Pre-commit validation OK.\\033[0m"
 exit 0
 """
 

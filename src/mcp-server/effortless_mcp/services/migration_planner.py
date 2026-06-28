@@ -3,17 +3,62 @@ import json
 import shutil
 from typing import Dict, Any, List
 
-def init_migration_project(repo_path: str, analysis: Dict[str, Any]) -> str:
+def _backup_existing(repo_path: str) -> List[str]:
+    """Sauvegarde non destructive d'une init Effortless préexistante avant overwrite (force=True).
+    effortless.json -> effortless.json.bak ; .effortless/ -> .effortless.bak/ (remplace l'ancien .bak)."""
+    backed = []
+    cfg = os.path.join(repo_path, "effortless.json")
+    if os.path.exists(cfg):
+        shutil.copy2(cfg, cfg + ".bak")
+        backed.append("effortless.json.bak")
+    edir = os.path.join(repo_path, ".effortless")
+    if os.path.isdir(edir):
+        bak = edir + ".bak"
+        if os.path.exists(bak):
+            shutil.rmtree(bak)
+        shutil.copytree(edir, bak)
+        backed.append(".effortless.bak/")
+    return backed
+
+
+def _render_migration_preview(config: Dict[str, Any], tasks: List[Dict[str, Any]],
+                              analysis: Dict[str, Any]) -> str:
+    """Aperçu non destructif : décrit ce que migrate_init écrirait, sans rien toucher au disque."""
+    relocations = analysis.get("proposed_relocations", [])
+    lines = ["🔬 MIGRATION PREVIEW (dry-run — nothing was written)\n"]
+    lines.append(f"Target project: {config['project']['name']}")
+    lines.append(
+        f"Target workflow: {config['workflow']['current_phase']} "
+        f"({len(config['workflow']['phases'])} migration phases)"
+    )
+    lines.append(f"Migration tasks to create: {len(tasks)}")
+    lines.append(f"Proposed relocations: {len(relocations)} (original hierarchy preserved)")
+    if relocations:
+        lines.append("\nRelocations (first 15):")
+        for item in relocations[:15]:
+            lines.append(f"  • `{item['source']}` -> `{item['target']}`")
+        if len(relocations) > 15:
+            lines.append(f"  … and {len(relocations) - 15} more.")
+    lines.append(
+        "\n👉 Non-destructive preview. Re-run effortless_migrate_init(..., confirm=True) "
+        "to actually scaffold the Effortless config, tasks and doc templates."
+    )
+    return "\n".join(lines)
+
+
+def init_migration_project(repo_path: str, analysis: Dict[str, Any],
+                           force: bool = False, dry_run: bool = True) -> str:
     """
     Initialise la configuration Effortless locale dans le dépôt cible avec le backlog de migration.
+
+    Sûr par défaut : `dry_run=True` n'écrit RIEN et retourne un aperçu. Pour scaffolder
+    réellement, appeler avec `dry_run=False`. Refuse d'écraser une init Effortless existante
+    sauf `force=True`, qui sauvegarde d'abord l'existant en `.bak`.
     """
     effortless_dir = os.path.join(repo_path, ".effortless")
-    os.makedirs(effortless_dir, exist_ok=True)
-    os.makedirs(os.path.join(effortless_dir, "tasks"), exist_ok=True)
-    os.makedirs(os.path.join(effortless_dir, "decisions"), exist_ok=True)
-    os.makedirs(os.path.join(effortless_dir, "questions"), exist_ok=True)
+    config_path = os.path.join(repo_path, "effortless.json")
 
-    # 1. Écrire effortless.json cible
+    # 1. Données cibles (construites AVANT tout I/O pour permettre l'aperçu dry-run)
     config = {
         "project": {
             "name": os.path.basename(os.path.normpath(repo_path)),
@@ -71,20 +116,15 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any]) -> str:
         }
     }
 
-    with open(os.path.join(repo_path, "effortless.json"), "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
-
-    # 2. Écrire state.json cible
+    # 2. État cible (state.json)
     state = {
         "project_name": config["project"]["name"],
         "current_phase": "M-observe",
         "started_at": "2026-06-28T18:00:00Z",
         "completed_phases": []
     }
-    with open(os.path.join(effortless_dir, "state.json"), "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
 
-    # 3. Écrire les tâches de migration initiales
+    # 3. Tâches de migration initiales
     tasks = [
         {
             "id": "TSK-M-01",
@@ -120,67 +160,118 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any]) -> str:
         }
     ]
 
+    # 4. Aperçu non destructif (défaut) : ne rien écrire, retourner le plan.
+    already = os.path.exists(config_path) or os.path.exists(effortless_dir)
+    if dry_run:
+        preview = _render_migration_preview(config, tasks, analysis)
+        if already:
+            preview = (
+                "⚠️ NOTE: this project already looks initialised; a real run would require "
+                "force=True (existing config/.effortless are backed up first).\n\n"
+            ) + preview
+        return preview
+
+    # 5. Garde-fou « déjà initialisé » : ne jamais écraser config/docs/workflow sans force.
+    if already and not force:
+        found = "effortless.json" if os.path.exists(config_path) else ".effortless/"
+        return (
+            f"⛔ Project already initialised for Effortless (found {found}). "
+            "migrate_init will NOT overwrite existing config, docs or workflow.\n"
+            "👉 To re-initialise anyway, call effortless_migrate_init(..., confirm=True, force=True) "
+            "— the existing effortless.json and .effortless/ are backed up to .bak first."
+        )
+
+    backup_note = ""
+    if already and force:
+        backed = _backup_existing(repo_path)
+        if backed:
+            backup_note = f" (backed up: {', '.join(backed)})"
+
+    # 6. Écritures réelles (uniquement après dry-run levé et garde-fou franchi)
+    os.makedirs(effortless_dir, exist_ok=True)
+    os.makedirs(os.path.join(effortless_dir, "tasks"), exist_ok=True)
+    os.makedirs(os.path.join(effortless_dir, "decisions"), exist_ok=True)
+    os.makedirs(os.path.join(effortless_dir, "questions"), exist_ok=True)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+    with open(os.path.join(effortless_dir, "state.json"), "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
+
     for t in tasks:
         with open(os.path.join(effortless_dir, "tasks", f"{t['id']}.json"), "w", encoding="utf-8") as f:
             json.dump(t, f, indent=2, ensure_ascii=False)
 
-    # 4. Sauvegarder la proposition de plan de migration physique
     with open(os.path.join(effortless_dir, "migration_plan.json"), "w", encoding="utf-8") as f:
         json.dump(analysis["proposed_relocations"], f, indent=2, ensure_ascii=False)
 
-    # 5. Créer les dossiers de cadrage cibles
     os.makedirs(os.path.join(repo_path, "cadrage", "Phase-001"), exist_ok=True)
 
-    # Créer les templates initiaux de cadrage M-observe
+    # Templates initiaux de cadrage M-observe
     with open(os.path.join(repo_path, "cadrage", "Phase-001", "00-FNC-GLO-glossaire.md"), "w", encoding="utf-8") as f:
-        f.write("---\nphase: M-observe\nstatut: Actif\n---\n# Glossaire de Migration\n\n- **Migration** : Passage sous le framework Effortless.\n")
+        f.write("---\nphase: M-observe\nstatut: Active\n---\n# Migration Glossary\n\n- **Migration** : Onboarding onto the Effortless framework.\n")
 
     with open(os.path.join(repo_path, "cadrage", "Phase-001", "01-TEC-ANA-analyse.md"), "w", encoding="utf-8") as f:
-        f.write("---\nphase: M-observe\nstatut: Actif\n---\n# Analyse de Migration\n\nStack détectée : " + ", ".join(analysis["stack"]) + "\n")
+        f.write("---\nphase: M-observe\nstatut: Active\n---\n# Migration Analysis\n\nDetected stack: " + ", ".join(analysis["stack"]) + "\n")
 
-    return f"Projet {config['project']['name']} initialisé sous Effortless avec 4 tâches de migration."
+    return f"Project {config['project']['name']} initialised under Effortless with 4 migration tasks{backup_note}."
 
 
-def apply_migration_project(repo_path: str) -> str:
+def apply_migration_project(repo_path: str, dry_run: bool = False) -> str:
     """
     Exécute physiquement les déplacements de fichiers configurés dans le plan de migration.
+
+    `dry_run=True` n'effectue AUCUN déplacement et n'écrit aucun rapport : il retourne
+    seulement ce qui serait déplacé (audit non destructif avant validation).
     """
     plan_path = os.path.join(repo_path, ".effortless", "migration_plan.json")
     if not os.path.exists(plan_path):
-        return "Erreur : Plan de migration (.effortless/migration_plan.json) introuvable. Veuillez exécuter effortless_migrate_init d'abord."
+        return "Error: Migration plan (.effortless/migration_plan.json) not found. Please run effortless_migrate_init first."
 
     with open(plan_path, "r", encoding="utf-8") as f:
         relocations = json.load(f)
 
     report_lines = []
     success_count = 0
+    movable_count = 0
 
     for item in relocations:
         src = os.path.join(repo_path, item["source"])
         dst = os.path.join(repo_path, item["target"])
 
         if os.path.exists(src):
+            if dry_run:
+                # Audit seul : on n'écrit rien, on ne déplace rien.
+                report_lines.append(f"• WOULD MOVE: `{item['source']}` -> `{item['target']}`")
+                movable_count += 1
+                continue
             # Créer le répertoire parent si nécessaire
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             try:
-                if os.path.isdir(src):
-                    # Déplacer le dossier
-                    shutil.move(src, dst)
-                else:
-                    # Déplacer le fichier
-                    shutil.move(src, dst)
-                report_lines.append(f"✅ Déplacé: `{item['source']}` -> `{item['target']}`")
+                # shutil.move gère fichier comme dossier de façon identique ici.
+                shutil.move(src, dst)
+                report_lines.append(f"✅ Moved: `{item['source']}` -> `{item['target']}`")
                 success_count += 1
             except Exception as e:
-                report_lines.append(f"❌ Échec de déplacement de `{item['source']}` : {str(e)}")
+                report_lines.append(f"❌ Failed to move `{item['source']}` : {str(e)}")
         else:
-            report_lines.append(f"⚠️ Source introuvable : `{item['source']}` (déjà déplacé ?)")
+            report_lines.append(f"⚠️ Source not found: `{item['source']}` (already moved?)")
+
+    if dry_run:
+        # Aucun effet de bord : ni déplacement, ni migration_report.md écrit.
+        body = "\n".join(report_lines) if report_lines else "(nothing to move)"
+        return (
+            f"🔬 MIGRATION APPLY PREVIEW (dry-run — nothing moved): "
+            f"{movable_count}/{len(relocations)} relocations would run.\n{body}\n"
+            "👉 Re-run effortless_migrate_apply(..., dry_run=False) to perform the moves."
+        )
 
     # Écrire le rapport de migration
-    report_content = "# Rapport de Migration Physique\n\n"
+    report_content = "# Physical Migration Report\n\n"
     report_content += "\n".join(report_lines)
-    
+
     with open(os.path.join(repo_path, "migration_report.md"), "w", encoding="utf-8") as f:
         f.write(report_content)
 
-    return f"Migration appliquée : {success_count}/{len(relocations)} réorganisations effectuées. Détails dans 'migration_report.md'."
+    return f"Migration applied: {success_count}/{len(relocations)} relocations completed. Details in 'migration_report.md'."

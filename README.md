@@ -120,7 +120,7 @@ You: "Set up Effortless here for project 'Delta'."
 
 You: "Are we ready to move past Observer?"
    → effortless_status()
-   ❌ NON — `cadrage/Phase-001/01-TEC-ANA-analyse.md` missing; Q-01 (Blocker) unresolved.
+   ❌ NO — `cadrage/Phase-001/01-TEC-ANA-analyse.md` missing; Q-01 (Blocker) unresolved.
 
 You: "Advance to the next phase."
    → effortless_phase_next()   # blocked until the checklist is green
@@ -182,7 +182,7 @@ You: "Start TSK-E-01."
 | `effortless_loop_init` | Start an autonomous execution session with a goal. |
 | `effortless_loop_step` | Advance the state machine: pick a task → **delegate / decompose / triage** → run tests → auto-commit on green. |
 
-The loop is a state machine — `Plan → Implementation → Recette (tests + anti-drift) → Livraison` — with a built-in **delegation doctrine**:
+The loop is a state machine — `Plan → Implementation → Acceptance (tests + anti-drift) → Delivery` — with a built-in **delegation doctrine**:
 
 - a **simple** task → consign to **delegate** it to a fresh sub-agent (its verbose output never pollutes the main context);
 - a **complex** task → consign to **decompose** it into simple sub-tasks;
@@ -194,7 +194,7 @@ It also stops safely: tests run under a timeout, repeated failures abort after a
 You: "Run the project to completion. Tests: 'cd src/mcp-server && pytest -q'."
    → effortless_loop_init(goal="Finish the backlog")
    → effortless_loop_step(test_command="cd src/mcp-server && pytest -q")
-   📋 [DÉLÉGUER] TSK-E-01 selected — delegate to a sub-agent, return a compact result.
+   📋 [DELEGATE] TSK-E-01 selected — delegate to a sub-agent, return a compact result.
 ```
 
 ### 6 · Anti-drift

@@ -148,7 +148,7 @@ def effortless_init(
     paths = get_paths(root)
     
     if os.path.exists(paths["config"]) and not force:
-        return "Erreur : Un fichier effortless.json existe déjà. Utilisez force=True pour écraser."
+        return "Error: An effortless.json file already exists. Use force=True to overwrite."
 
     # Nom de projet par défaut
     name = project_name or os.path.basename(os.path.abspath(root))
@@ -232,7 +232,7 @@ def effortless_init(
         with open(glossary_path, "w", encoding="utf-8") as f:
             f.write("---\nphase: O-analyse\nstatut: Actif\n---\n\n# 📓 Glossaire Métier\n\nDéfinissez ici vos termes métiers.\n")
 
-    return f"Projet '{name}' initialisé avec succès sous {root}."
+    return f"Project '{name}' successfully initialized under {root}."
 
 @mcp.tool()
 def effortless_status() -> str:
@@ -243,7 +243,7 @@ def effortless_status() -> str:
     paths = get_paths(root)
 
     if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé. Veuillez exécuter 'effortless_init'."
+        return "Error: Project not initialized. Please run 'effortless_init'."
 
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
@@ -257,7 +257,7 @@ def effortless_status() -> str:
     phase_config = next((p for p in phases_list if p["id"] == current_phase_id), None)
 
     if not phase_config:
-        return f"Erreur : La phase active '{current_phase_id}' n'est pas définie dans effortless.json."
+        return f"Error: Active phase '{current_phase_id}' is not defined in effortless.json."
 
     required_docs = phase_config.get("required_documents", [])
     
@@ -274,23 +274,23 @@ def effortless_status() -> str:
         questions = load_entities(paths["questions"])
         open_questions_list = [q for q in questions if q.get("status") != "Resolved" and q.get("phase") == current_phase_id]
 
-    status_report = f"📋 Statut du Projet : {state_data.get('project_name')}\n"
-    status_report += f"Phase en cours : **{phase_config.get('name')}** ({current_phase_id})\n"
-    status_report += f"Éligibilité pour la phase suivante : {'✅ OUI (Prêt)' if is_valid else '❌ NON (Bloqué)'}\n\n"
+    status_report = f"📋 Project Status: {state_data.get('project_name')}\n"
+    status_report += f"Current phase: **{phase_config.get('name')}** ({current_phase_id})\n"
+    status_report += f"Next-phase eligibility: {'✅ YES (Ready)' if is_valid else '❌ NO (Blocked)'}\n\n"
 
-    status_report += "🔍 Checklist des documents requis :\n"
+    status_report += "🔍 Required documents checklist:\n"
     for item in checklist:
         status_icon = "✅" if item["is_valid"] else ("⚠️" if item["is_present"] else "❌")
         error_msg = f" ({', '.join(item['errors'])})" if item["errors"] else ""
         status_report += f"- {status_icon} `{item['document_path']}`{error_msg}\n"
 
     if open_questions_list:
-        status_report += "\n❓ Questions ouvertes de cette phase :\n"
+        status_report += "\n❓ Open questions for this phase:\n"
         for q in open_questions_list:
             status_report += f"- [`{q['id']}`] **{q['question']}** (Impact: {q['impact']})\n"
 
     if blocking_reasons:
-        status_report += "\n❌ Raisons bloquantes :\n"
+        status_report += "\n❌ Blocking reasons:\n"
         for reason in blocking_reasons:
             status_report += f"- {reason}\n"
 
@@ -305,7 +305,7 @@ def effortless_phase_next() -> str:
     paths = get_paths(root)
 
     if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
@@ -319,10 +319,10 @@ def effortless_phase_next() -> str:
     current_idx = next((i for i, p in enumerate(phases_list) if p["id"] == current_phase_id), -1)
 
     if current_idx == -1:
-        return f"Erreur : Phase active '{current_phase_id}' inconnue."
+        return f"Error: Active phase '{current_phase_id}' is unknown."
 
     if current_idx == len(phases_list) - 1:
-        return "Vous êtes déjà à la dernière phase configurée du projet !"
+        return "You are already on the last configured phase of the project!"
 
     # Valider les barrières de la phase en cours
     phase_config = phases_list[current_idx]
@@ -335,7 +335,7 @@ def effortless_phase_next() -> str:
     )
 
     if not is_valid:
-        return "Transition bloquée :\n" + "\n".join([f"- {r}" for r in blocking_reasons])
+        return "Transition blocked:\n" + "\n".join([f"- {r}" for r in blocking_reasons])
 
     # Effectuer la transition
     next_phase = phases_list[current_idx + 1]
@@ -367,23 +367,23 @@ def effortless_phase_next() -> str:
         sync_success = sync_phase_to_secondbrain(project_slug, next_phase["id"])
         
         # 2. Créer une archive récapitulative
-        archive_subject = f"Fin de la phase {current_phase_id} et passage à {next_phase['id']}"
-        archive_body = f"# Rapport de Fin de Phase -- {current_phase_id}\n\n"
-        archive_body += f"Le projet **{state_data.get('project_name')}** a validé toutes les barrières de la phase **{phase_config.get('name')}**.\n\n"
-        archive_body += f"### 🔍 Checklist des Documents :\n"
+        archive_subject = f"End of phase {current_phase_id} and transition to {next_phase['id']}"
+        archive_body = f"# End-of-Phase Report -- {current_phase_id}\n\n"
+        archive_body += f"Project **{state_data.get('project_name')}** has passed all gates for phase **{phase_config.get('name')}**.\n\n"
+        archive_body += f"### 🔍 Document Checklist:\n"
         for item in checklist:
             status_icon = "✅" if item["is_valid"] else "❌"
             archive_body += f"- {status_icon} `{item['document_path']}`\n"
             
         archive_name = create_secondbrain_archive(project_slug, archive_subject, archive_body)
         if sync_success and archive_name:
-            sb_msg = f"\n[Symbiose SecondBrain] Synchro context.md et archive '{archive_name}' créés dans {vault_path}."
+            sb_msg = f"\n[SecondBrain Symbiosis] context.md sync and archive '{archive_name}' created in {vault_path}."
         else:
-            sb_msg = "\n[Symbiose SecondBrain] Liaison configurée mais impossible de synchroniser les fichiers (projet introuvable dans le vault ?)."
+            sb_msg = "\n[SecondBrain Symbiosis] Link configured but unable to sync files (project not found in vault?)."
     else:
-        sb_msg = "\n[Symbiose SecondBrain] SecondBrain non détecté ou vault non configuré dans ~/.memory-kit/config.json."
+        sb_msg = "\n[SecondBrain Symbiosis] SecondBrain not detected or vault not configured in ~/.memory-kit/config.json."
 
-    return f"Transition effectuée avec succès de '{current_phase_id}' vers '{next_phase['id']}' ({next_phase['name']}).{sb_msg}"
+    return f"Transition successfully completed from '{current_phase_id}' to '{next_phase['id']}' ({next_phase['name']}).{sb_msg}"
 
 # --- 2. Outils de Décisions (ADR) ---
 
@@ -402,7 +402,7 @@ def effortless_decision_add(
     paths = get_paths(root)
 
     if not os.path.exists(paths["config"]) or not os.path.exists(paths["decisions"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -454,7 +454,7 @@ def effortless_decision_add(
     markdown_path = os.path.join(root, dec_doc_rel)
     sync_decisions_to_markdown(markdown_path, current_phase_id, decisions)
 
-    return f"Décision {dec_id} ajoutée et synchronisée dans {dec_doc_rel}."
+    return f"Decision {dec_id} added and synced to {dec_doc_rel}."
 
 # --- 3. Outils de Questions (BQO) ---
 
@@ -472,11 +472,11 @@ def effortless_question_ask(
     paths = get_paths(root)
 
     if not os.path.exists(paths["config"]) or not os.path.exists(paths["questions"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     # B8 : valider l'impact AVANT toute écriture (un 'blocker' mal casé contournait la barrière).
     if impact not in ("Blocker", "Structuring", "Minor"):
-        return f"Erreur : impact invalide '{impact}'. Valeurs autorisées : Blocker, Structuring, Minor."
+        return f"Error: invalid impact '{impact}'. Allowed values: Blocker, Structuring, Minor."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -527,7 +527,7 @@ def effortless_question_ask(
     phase_questions = [q for q in questions if q.get("phase") == current_phase_id]
     sync_questions_to_markdown(markdown_path, current_phase_id, project_name, phase_questions)
 
-    return f"Question {q_id} posée et synchronisée dans {bqo_doc_rel}."
+    return f"Question {q_id} submitted and synced to {bqo_doc_rel}."
 
 @mcp.tool()
 def effortless_question_resolve(
@@ -541,7 +541,7 @@ def effortless_question_resolve(
     paths = get_paths(root)
 
     if not os.path.exists(paths["config"]) or not os.path.exists(paths["questions"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -551,7 +551,7 @@ def effortless_question_resolve(
 
     target_q = next((q for q in questions if q["id"] == question_id), None)
     if not target_q:
-        return f"Erreur : Question '{question_id}' introuvable."
+        return f"Error: Question '{question_id}' not found."
 
     target_q["status"] = "Resolved"
     target_q["answer"] = answer
@@ -594,9 +594,9 @@ def effortless_question_resolve(
 
     # Si c'était la dernière question bloquante et que tous les documents sont conformes,
     # nous pouvons le notifier.
-    blocker_info = "Il reste des questions bloquantes pour cette phase." if has_more_blockers else "Plus aucune question bloquante pour cette phase."
+    blocker_info = "There are still blocking questions for this phase." if has_more_blockers else "No more blocking questions for this phase."
 
-    return f"Question {question_id} résolue avec succès. {blocker_info}"
+    return f"Question {question_id} successfully resolved. {blocker_info}"
 
 # --- 4. Outils de Tâches ---
 
@@ -614,10 +614,10 @@ def effortless_task_add(
     paths = get_paths(root)
 
     if not os.path.exists(paths["tasks"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     if complexity is not None and complexity not in ("simple", "complex"):
-        return f"Erreur : complexity invalide '{complexity}'. Valeurs autorisées : simple, complex."
+        return f"Error: invalid complexity '{complexity}'. Allowed values: simple, complex."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -655,7 +655,7 @@ def effortless_task_add(
     # Sauvegarde JSON individuelle
     save_entity(paths["tasks"], tsk_id, new_task_dump)
 
-    return f"Tâche {tsk_id} créée ('{title}') associée à la phase {current_phase_id}."
+    return f"Task {tsk_id} created ('{title}') for phase {current_phase_id}."
 
 @mcp.tool()
 def effortless_task_update(
@@ -669,16 +669,16 @@ def effortless_task_update(
     paths = get_paths(root)
 
     if not os.path.exists(paths["tasks"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     if status not in ["Todo", "Doing", "Done"]:
-        return "Erreur : Le statut doit être 'Todo', 'Doing' ou 'Done'."
+        return "Error: Status must be 'Todo', 'Doing', or 'Done'."
 
     tasks = load_entities(paths["tasks"])
 
     target_task = next((t for t in tasks if t["id"] == task_id), None)
     if not target_task:
-        return f"Erreur : Tâche '{task_id}' introuvable."
+        return f"Error: Task '{task_id}' not found."
 
     # Si on passe à Doing, vérifier les dépendances
     if status == "Doing":
@@ -686,14 +686,14 @@ def effortless_task_update(
         for dep_id in dependencies:
             dep_task = next((t for t in tasks if t["id"] == dep_id), None)
             if not dep_task or dep_task.get("status") != "Done":
-                return f"Erreur : Impossible de démarrer la tâche '{task_id}'. La tâche dépendante '{dep_id}' n'est pas terminée."
+                return f"Error: Cannot start task '{task_id}'. Dependent task '{dep_id}' is not done."
 
     target_task["status"] = status
 
     # Sauvegarde JSON individuelle
     save_entity(paths["tasks"], task_id, target_task)
 
-    return f"Tâche '{task_id}' mise à jour avec le statut '{status}'."
+    return f"Task '{task_id}' updated to status '{status}'."
 
 @mcp.tool()
 def effortless_task_classify(
@@ -708,20 +708,20 @@ def effortless_task_classify(
     paths = get_paths(root)
 
     if not os.path.exists(paths["tasks"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     if complexity not in ("simple", "complex"):
-        return f"Erreur : complexity invalide '{complexity}'. Valeurs autorisées : simple, complex."
+        return f"Error: invalid complexity '{complexity}'. Allowed values: simple, complex."
 
     tasks = load_entities(paths["tasks"])
     target = next((t for t in tasks if t["id"] == task_id), None)
     if not target:
-        return f"Erreur : Tâche '{task_id}' introuvable."
+        return f"Error: Task '{task_id}' not found."
 
     target["complexity"] = complexity
     save_entity(paths["tasks"], task_id, target)
 
-    return f"Tâche '{task_id}' classée '{complexity}'."
+    return f"Task '{task_id}' classified as '{complexity}'."
 
 @mcp.tool()
 def effortless_secondbrain_sync() -> str:
@@ -732,7 +732,7 @@ def effortless_secondbrain_sync() -> str:
     paths = get_paths(root)
 
     if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
-        return "Erreur : Projet non initialisé."
+        return "Error: Project not initialized."
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
@@ -741,22 +741,22 @@ def effortless_secondbrain_sync() -> str:
 
     vault_path = get_secondbrain_vault_path()
     if not vault_path:
-        return "Erreur : SecondBrain non configuré (vault introuvable dans ~/.memory-kit/config.json)."
+        return "Error: SecondBrain not configured (vault not found in ~/.memory-kit/config.json)."
 
     # 1. Sync phase
     sync_success = sync_phase_to_secondbrain(project_slug, current_phase_id)
 
     # 2. Archive
-    archive_subject = f"Synchronisation manuelle d'état -- {current_phase_id}"
-    archive_body = f"# Rapport de Synchronisation Manuelle -- {current_phase_id}\n\n"
-    archive_body += f"Projet : {state_data.get('project_name')}\n"
-    archive_body += f"Phase active : {current_phase_id}\n\n"
+    archive_subject = f"Manual state sync -- {current_phase_id}"
+    archive_body = f"# Manual Sync Report -- {current_phase_id}\n\n"
+    archive_body += f"Project: {state_data.get('project_name')}\n"
+    archive_body += f"Active phase: {current_phase_id}\n\n"
     
     # Décisions
     decisions = load_entities(paths["decisions"])
-    archive_body += "### 🏛️ Décisions prises :\n"
+    archive_body += "### 🏛️ Decisions made:\n"
     if not decisions:
-        archive_body += "*Aucune décision*\n"
+        archive_body += "*No decisions*\n"
     else:
         for dec in decisions:
             archive_body += f"- **{dec['id']}** : {dec['title']} ({dec['status']})\n"
@@ -764,9 +764,9 @@ def effortless_secondbrain_sync() -> str:
     archive_name = create_secondbrain_archive(project_slug, archive_subject, archive_body)
 
     if sync_success and archive_name:
-        return f"Synchronisation réussie avec SecondBrain dans {vault_path}. Archive créée : '{archive_name}'."
+        return f"Successfully synced with SecondBrain in {vault_path}. Archive created: '{archive_name}'."
     else:
-        return f"Erreur lors de la synchronisation (le dossier projet '{project_slug}' existe-t-il dans SecondBrain ?)."
+        return f"Sync error (does the project folder '{project_slug}' exist in SecondBrain?)."
 
 @mcp.tool()
 def effortless_drift_check(strict: bool = False) -> str:
@@ -778,31 +778,31 @@ def effortless_drift_check(strict: bool = False) -> str:
 
     is_drifting, modified_files, active_tasks = check_project_drift(root, paths["tasks"])
 
-    report = "🛡️ SYSTÈME ANTI-DRIFT\n"
+    report = "🛡️ ANTI-DRIFT SYSTEM\n"
     report += "====================\n"
-    
+
     if len(modified_files) == 0:
-        report += "✅ Aucun fichier de code source modifié localement. Pas de dérive possible.\n"
+        report += "✅ No modified source files locally. No drift possible.\n"
         return report
 
-    report += f"📝 Fichiers de code source modifiés ({len(modified_files)}) :\n"
+    report += f"📝 Modified source files ({len(modified_files)}):\n"
     for f in modified_files:
         report += f"- {f}\n"
 
-    report += f"\n📋 Tâches actives en cours ('Doing') ({len(active_tasks)}) :\n"
+    report += f"\n📋 Active tasks in progress ('Doing') ({len(active_tasks)}):\n"
     if len(active_tasks) == 0:
-        report += "❌ AUCUNE TÂCHE EN COURS D'EXÉCUTION !\n"
+        report += "❌ NO TASK CURRENTLY RUNNING!\n"
     else:
         for t in active_tasks:
             report += f"- [{t['id']}] {t['title']}\n"
 
     if is_drifting:
-        report += "\n⚠️ RÉSULTAT : DÉRIVE CONSTATÉE ! Du code source a été modifié sans tâche active associée."
+        report += "\n⚠️ RESULT: DRIFT DETECTED! Source code was modified without an associated active task."
         # R6 : un outil MCP doit renvoyer une str sur tous les chemins (pas raise). Le mode
         # strict pour le hook git est géré par le CLI (main.py --drift-check-strict), qui
         # appelle check_project_drift et mappe la dérive sur un code de sortie non nul.
     else:
-        report += "\n✅ RÉSULTAT : CONFORME. Les modifications de code sont couvertes par les tâches actives."
+        report += "\n✅ RESULT: COMPLIANT. Code changes are covered by active tasks."
 
     return report
 
@@ -814,9 +814,9 @@ def effortless_drift_hook_install() -> str:
     root = get_project_root()
     try:
         hook_path = install_git_pre_commit_hook(root)
-        return f"Hook Git pre-commit installé avec succès dans : {hook_path}\nIl bloquera les commits en cas de dérive de code (drift)."
+        return f"Git pre-commit hook successfully installed at: {hook_path}\nIt will block commits if code drift is detected."
     except Exception as e:
-        return f"Erreur lors de l'installation du hook : {str(e)}"
+        return f"Error installing hook: {str(e)}"
 
 @mcp.tool()
 def effortless_deploy() -> str:
@@ -827,13 +827,13 @@ def effortless_deploy() -> str:
     results = deploy_to_mcp_clients(root)
     
     if not results:
-        return "Aucun client compatible détecté pour le déploiement automatique."
-        
-    report = "🚀 RAPPORT DE DÉPLOIEMENT MULTI-CLI/APP :\n"
+        return "No compatible client detected for automatic deployment."
+
+    report = "🚀 MULTI-CLI/APP DEPLOYMENT REPORT:\n"
     report += "========================================\n"
     for r in results:
         status_icon = "✅" if r["status"] == "success" else "❌"
-        report += f"{status_icon} **{r['name']}** : {r['action']} (chemin : {r['path']})\n"
+        report += f"{status_icon} **{r['name']}**: {r['action']} (path: {r['path']})\n"
         
     return report
 
@@ -897,8 +897,8 @@ def effortless_web_ui_launch() -> str:
 
     if not os.path.exists(web_ui_dist):
         return (
-            f"⚠️ Le dashboard compilé est introuvable ({web_ui_dist}).\n"
-            "Pour le compiler, depuis l'installation Effortless :\n"
+            f"⚠️ Compiled dashboard not found ({web_ui_dist}).\n"
+            "To build it, from the Effortless installation:\n"
             "  cd src/web-ui && npm install && npm run build"
         )
 
@@ -947,39 +947,45 @@ def effortless_web_ui_launch() -> str:
     url = f"http://localhost:{port}"
     webbrowser.open(url)
 
-    return f"Dashboard démarré à l'adresse {url} (API: {url}/api/overview) et ouvert dans votre navigateur."
+    return f"Dashboard started at {url} (API: {url}/api/overview) and opened in your browser."
 
 
 @mcp.tool()
-def effortless_migrate_init(target_path: str) -> str:
+def effortless_migrate_init(target_path: str, confirm: bool = False, force: bool = False) -> str:
     """
-    Analyse un projet cible existant et l'initialise pour Effortless en générant les tâches de migration adaptées.
+    Analyse un projet cible existant et prépare sa migration vers Effortless.
+
+    Sûr par défaut : sans `confirm=True`, retourne un APERÇU non destructif (rien n'est écrit).
+    `confirm=True` scaffolde réellement la config, les tâches et les templates de cadrage.
+    Refuse d'écraser un projet déjà initialisé sauf `force=True` (qui sauvegarde l'existant en .bak).
     """
     try:
         analysis = analyze_target_repo(target_path)
-        report = init_migration_project(target_path, analysis)
-        
+        report = init_migration_project(target_path, analysis, force=force, dry_run=not confirm)
+
         # Ajouter le diagnostic dans le rapport retourné
-        diagnostic = f"🔍 DIAGNOSTIC DE SÉCURITÉ DE MIGRATION POUR {target_path}\n"
-        diagnostic += f"- Stack détectée : {', '.join(analysis['stack'])}\n"
-        diagnostic += f"- Frameworks identifiés : {', '.join(analysis['frameworks']) or 'Aucun'}\n"
-        diagnostic += f"- Nombre de fichiers sources : {analysis['source_files_count']}\n"
-        diagnostic += f"- Fichiers de doc détectés : {len(analysis['docs_files'])}\n"
-        diagnostic += f"- Réorganisations proposées : {len(analysis['proposed_relocations'])}\n\n"
-        
+        diagnostic = f"🔍 MIGRATION SAFETY DIAGNOSTIC FOR {target_path}\n"
+        diagnostic += f"- Detected stack: {', '.join(analysis['stack'])}\n"
+        diagnostic += f"- Identified frameworks: {', '.join(analysis['frameworks']) or 'None'}\n"
+        diagnostic += f"- Source file count: {analysis['source_files_count']}\n"
+        diagnostic += f"- Detected doc files: {len(analysis['docs_files'])}\n"
+        diagnostic += f"- Proposed reorganizations: {len(analysis['proposed_relocations'])}\n\n"
+
         return diagnostic + report
     except Exception as e:
-        return f"Erreur lors de l'initialisation de la migration : {str(e)}"
+        return f"Error initializing migration: {str(e)}"
 
 @mcp.tool()
-def effortless_migrate_apply(target_path: str) -> str:
+def effortless_migrate_apply(target_path: str, dry_run: bool = False) -> str:
     """
-    Exécute physiquement les déplacements de réorganisation de dossiers de documentation et de codebase après validation.
+    Exécute physiquement les déplacements de réorganisation de documentation et de codebase.
+
+    `dry_run=True` retourne un audit des déplacements prévus SANS rien déplacer ni écrire.
     """
     try:
-        return apply_migration_project(target_path)
+        return apply_migration_project(target_path, dry_run=dry_run)
     except Exception as e:
-        return f"Erreur lors de l'application de la migration : {str(e)}"
+        return f"Error applying migration: {str(e)}"
 
 @mcp.tool()
 def effortless_loop_init(goal: str) -> str:

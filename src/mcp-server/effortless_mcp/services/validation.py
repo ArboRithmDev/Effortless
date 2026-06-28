@@ -31,7 +31,7 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
         if re.search(pattern, content, re.IGNORECASE):
             # Ignorer le glossaire qui peut légitimement lister ces termes
             if "glossaire" not in doc_rel_path.lower():
-                errors.append(f"Placeholders non remplis détectés ('{pattern.replace('\\', '')}')")
+                errors.append(f"Unfilled placeholders detected ('{pattern.replace('\\', '')}')")
                 break
                 
     # 2. Vérification des sections obligatoires selon le type de document
@@ -39,21 +39,21 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
     
     if "bqo" in doc_lower or "questions" in doc_lower:
         if not _has_h2_section(content, "tableau récapitulatif"):
-            errors.append("Section obligatoire manquante : '## Tableau Récapitulatif'")
+            errors.append("Required section missing: '## Tableau Récapitulatif'")
         if not _has_h2_section(content, "détail des questions"):
-            errors.append("Section obligatoire manquante : '## Détail des Questions'")
+            errors.append("Required section missing: '## Détail des Questions'")
 
     elif "dec" in doc_lower or "decision" in doc_lower:
         if not _has_h2_section(content, "liste des décisions"):
-            errors.append("Section obligatoire manquante : '## Liste des Décisions'")
+            errors.append("Required section missing: '## Liste des Décisions'")
 
     elif "arc" in doc_lower or "architecture" in doc_lower:
         if not _has_h2_section(content, "composants clés"):
-            errors.append("Section obligatoire manquante : '## Composants Clés'")
+            errors.append("Required section missing: '## Composants Clés'")
 
     elif "pln" in doc_lower or "plan" in doc_lower:
         if not _has_h2_section(content, "découpage des tâches"):
-            errors.append("Section obligatoire manquante : '## Découpage des Tâches'")
+            errors.append("Required section missing: '## Découpage des Tâches'")
             
     return errors
 
@@ -105,8 +105,8 @@ def validate_phase_documents(
 
         # 1. Existence
         if not os.path.exists(doc_path):
-            doc_status["errors"].append("Fichier manquant")
-            blocking_reasons.append(f"Document requis manquant : {doc_rel_path}")
+            doc_status["errors"].append("File missing")
+            blocking_reasons.append(f"Required document missing: {doc_rel_path}")
             checklist.append(doc_status)
             is_valid = False
             continue
@@ -115,8 +115,8 @@ def validate_phase_documents(
 
         # 2. Contenu minimal (non vide)
         if os.path.getsize(doc_path) == 0:
-            doc_status["errors"].append("Fichier vide")
-            blocking_reasons.append(f"Document vide : {doc_rel_path}")
+            doc_status["errors"].append("Empty file")
+            blocking_reasons.append(f"Empty document: {doc_rel_path}")
             checklist.append(doc_status)
             is_valid = False
             continue
@@ -126,25 +126,25 @@ def validate_phase_documents(
             metadata, content = parse_markdown_frontmatter(doc_path)
             
             if not metadata:
-                doc_status["errors"].append("Frontmatter YAML manquant ou incorrect")
-                blocking_reasons.append(f"Frontmatter YAML manquant ou incorrect dans {doc_rel_path}")
+                doc_status["errors"].append("Missing or invalid YAML frontmatter")
+                blocking_reasons.append(f"Missing or invalid YAML frontmatter in {doc_rel_path}")
                 is_valid = False
             else:
                 # Vérification des champs requis dans le frontmatter
                 if "phase" not in metadata:
-                    doc_status["errors"].append("Champ 'phase' manquant dans le Frontmatter")
-                    blocking_reasons.append(f"Champ 'phase' manquant dans {doc_rel_path}")
+                    doc_status["errors"].append("Missing 'phase' field in frontmatter")
+                    blocking_reasons.append(f"Missing 'phase' field in {doc_rel_path}")
                     is_valid = False
                 elif metadata["phase"] != current_phase_id:
                     doc_status["errors"].append(
-                        f"La phase du document ({metadata['phase']}) ne correspond pas à la phase active ({current_phase_id})"
+                        f"Document phase ({metadata['phase']}) does not match active phase ({current_phase_id})"
                     )
-                    blocking_reasons.append(f"Phase incohérente dans {doc_rel_path}")
+                    blocking_reasons.append(f"Inconsistent phase in {doc_rel_path}")
                     is_valid = False
 
                 if "statut" not in metadata:
-                    doc_status["errors"].append("Champ 'statut' manquant dans le Frontmatter")
-                    blocking_reasons.append(f"Champ 'statut' manquant dans {doc_rel_path}")
+                    doc_status["errors"].append("Missing 'statut' field in frontmatter")
+                    blocking_reasons.append(f"Missing 'statut' field in {doc_rel_path}")
                     is_valid = False
                 
                 # Validation structurelle et sémantique (placeholders + sections requis)
@@ -152,7 +152,7 @@ def validate_phase_documents(
                 if struct_errors:
                     for err in struct_errors:
                         doc_status["errors"].append(err)
-                        blocking_reasons.append(f"Structure invalide dans {doc_rel_path} : {err}")
+                        blocking_reasons.append(f"Invalid structure in {doc_rel_path}: {err}")
                     is_valid = False
                 
                 # Cas spécial : validation BQO
@@ -160,17 +160,17 @@ def validate_phase_documents(
                 if is_bqo:
                     if metadata.get("statut") not in ["Résolu", "Resolved"]:
                         doc_status["errors"].append(
-                            f"Le statut du BQO ({metadata.get('statut')}) doit être 'Résolu' ou 'Resolved' pour valider la phase"
+                            f"BQO status ({metadata.get('statut')}) must be 'Résolu' or 'Resolved' to validate the phase"
                         )
-                        blocking_reasons.append(f"BQO non résolu : {doc_rel_path}")
+                        blocking_reasons.append(f"Unresolved BQO: {doc_rel_path}")
                         is_valid = False
 
             if len(doc_status["errors"]) == 0:
                 doc_status["is_valid"] = True
 
         except Exception as e:
-            doc_status["errors"].append(f"Erreur d'analyse : {str(e)}")
-            blocking_reasons.append(f"Erreur d'analyse sur {doc_rel_path} : {str(e)}")
+            doc_status["errors"].append(f"Parse error: {str(e)}")
+            blocking_reasons.append(f"Parse error on {doc_rel_path}: {str(e)}")
             is_valid = False
 
         checklist.append(doc_status)
@@ -185,10 +185,10 @@ def validate_phase_documents(
                     and str(q.get("impact", "")).lower() == "blocker"
                     and q.get("status") not in ["Resolved", "Résolu"]
                 ):
-                    blocking_reasons.append(f"Question bloquante non résolue : {q.get('id')} - {q.get('question')}")
+                    blocking_reasons.append(f"Unresolved blocking question: {q.get('id')} - {q.get('question')}")
                     is_valid = False
         except Exception as e:
-            blocking_reasons.append(f"Erreur lors de la lecture des questions : {str(e)}")
+            blocking_reasons.append(f"Error reading questions: {str(e)}")
             is_valid = False
 
     return is_valid, checklist, blocking_reasons
