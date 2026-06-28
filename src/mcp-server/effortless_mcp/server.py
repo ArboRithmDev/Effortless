@@ -558,8 +558,18 @@ def effortless_task_add(
 
     tasks = load_entities(paths["tasks"])
 
-    # ID Séquentiel
-    tsk_id = f"TSK-{len(tasks) + 1:03d}"
+    # Déterminer le préfixe basé sur la phase active
+    parts = current_phase_id.split("-")
+    if len(parts) >= 3 and parts[0].lower() == "phase":
+        prefix = "-".join(parts[:3])
+    elif len(parts) >= 1:
+        prefix = parts[0]
+    else:
+        prefix = "TSK"
+
+    # Compter les tâches déjà créées dans cette même phase pour calculer le nouvel index
+    phase_tasks = [t for t in tasks if t.get("phase") == current_phase_id]
+    tsk_id = f"TSK-{prefix}-{len(phase_tasks) + 1:02d}"
 
     new_task = Task(
         id=tsk_id,
