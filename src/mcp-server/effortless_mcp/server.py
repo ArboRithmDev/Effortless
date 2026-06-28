@@ -805,6 +805,54 @@ def effortless_deploy() -> str:
     return report
 
 
+def build_project_overview(root: str) -> Dict[str, Any]:
+    """Agrège l'état complet du projet pour le dashboard Web (consommé via /api/overview)."""
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
+        return {"initialized": False}
+
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    with open(paths["state"], "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+
+    current_phase_id = state_data.get("current_phase")
+    phases_list = config_data.get("workflow", {}).get("phases", [])
+    phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
+    required_docs = phase_cfg.get("required_documents", []) if phase_cfg else []
+
+    is_valid, checklist, blocking = validate_phase_documents(
+        project_root=root,
+        current_phase_id=current_phase_id,
+        required_documents=required_docs,
+        questions_file_path=paths["questions"],
+    )
+
+    completed_ids = {cp.get("id") for cp in state_data.get("completed_phases", [])}
+    phases = [{
+        "id": p["id"],
+        "name": p.get("name"),
+        "description": p.get("description"),
+        "completed": p["id"] in completed_ids,
+        "current": p["id"] == current_phase_id,
+    } for p in phases_list]
+
+    return {
+        "initialized": True,
+        "project_name": state_data.get("project_name"),
+        "current_phase": current_phase_id,
+        "phase_name": phase_cfg.get("name") if phase_cfg else None,
+        "is_valid": is_valid,
+        "blocking_reasons": blocking,
+        "checklist": checklist,
+        "phases": phases,
+        "tasks": load_entities(paths["tasks"]),
+        "decisions": load_entities(paths["decisions"]),
+        "questions": load_entities(paths["questions"]),
+        "completed_phases": state_data.get("completed_phases", []),
+    }
+
+
 @mcp.tool()
 def effortless_web_ui_launch() -> str:
     """
@@ -829,10 +877,31 @@ def effortless_web_ui_launch() -> str:
     except Exception:
         port = 8080 # Fallback
 
-    # Handler pour servir le dossier dist/
+    # Handler : sert l'API JSON sous /api/*, sinon les fichiers statiques du bundle.
     class DashboardHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=web_ui_dist, **kwargs)
+
+        def log_message(self, *args):
+            pass  # silencieux
+
+        def _send_json(self, payload, code=200):
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path.split("?")[0] == "/api/overview":
+                try:
+                    self._send_json(build_project_overview(root))
+                except Exception as e:
+                    self._send_json({"error": str(e)}, code=500)
+                return
+            return super().do_GET()
 
     # Lancer le serveur HTTP
     def start_server():
@@ -845,7 +914,7 @@ def effortless_web_ui_launch() -> str:
     url = f"http://localhost:{port}"
     webbrowser.open(url)
 
-    return f"Dashboard démarré à l'adresse {url} et ouvert dans votre navigateur par défaut."
+    return f"Dashboard démarré à l'adresse {url} (API: {url}/api/overview) et ouvert dans votre navigateur."
 
 
 @mcp.tool()

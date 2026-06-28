@@ -48,12 +48,22 @@ uv pip install -e . pytest
 # Revenir à la racine
 cd "$PROJECT_ROOT" || exit 1
 
-# 3. Déploiement automatique multi-CLI / multi-App
-echo -e "\n${BLUE}[2/3] Déploiement automatique sur les clients MCP détectés...${NC}"
+# 3. Compilation du dashboard Web (optionnelle, nécessite npm)
+echo -e "\n${BLUE}[2/4] Compilation du dashboard Web...${NC}"
+if command -v npm &> /dev/null; then
+    npm --prefix "$PROJECT_ROOT/src/web-ui" install --no-audit --no-fund
+    npm --prefix "$PROJECT_ROOT/src/web-ui" run build
+    echo -e "${GREEN}[✓] Dashboard Web compilé (src/web-ui/dist).${NC}"
+else
+    echo -e "${YELLOW}[!] 'npm' introuvable — dashboard Web non compilé. Installez Node.js puis lancez : cd src/web-ui && npm install && npm run build${NC}"
+fi
+
+# 4. Déploiement automatique multi-CLI / multi-App
+echo -e "\n${BLUE}[3/4] Déploiement automatique sur les clients MCP détectés...${NC}"
 "$PROJECT_ROOT/src/mcp-server/.venv/bin/python" -c "from effortless_mcp.server import effortless_deploy; print(effortless_deploy())"
 
-# 4. Installation du hook Git pre-commit
-echo -e "\n${BLUE}[3/3] Installation du hook Git pre-commit anti-drift...${NC}"
+# 5. Installation du hook Git pre-commit
+echo -e "\n${BLUE}[4/4] Installation du hook Git pre-commit anti-drift...${NC}"
 "$PROJECT_ROOT/src/mcp-server/.venv/bin/python" -c "from effortless_mcp.server import effortless_drift_hook_install; print(effortless_drift_hook_install())"
 
 # 5. Message de succès
