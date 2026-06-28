@@ -1,7 +1,6 @@
 import os
 import json
 import shutil
-import sys
 from typing import List, Dict, Any
 
 
@@ -86,35 +85,9 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
         "args": [],
     }
 
-    # 1. Claude Desktop
-    claude_desktop_path = None
-    if sys.platform == "darwin":
-        claude_desktop_path = os.path.expanduser(
-            "~/Library/Application Support/Claude/claude_desktop_config.json"
-        )
-    elif sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            claude_desktop_path = os.path.join(
-                appdata, "Claude", "claude_desktop_config.json"
-            )
-
-    if claude_desktop_path and os.path.isdir(os.path.dirname(claude_desktop_path)):
-        try:
-            inject_json_mcp_server(claude_desktop_path, "effortless", json_entry)
-            results.append({
-                "name": "Claude Desktop",
-                "status": "success",
-                "path": claude_desktop_path,
-                "action": "Configured MCP server"
-            })
-        except Exception as e:
-            results.append({
-                "name": "Claude Desktop",
-                "status": "error",
-                "path": claude_desktop_path,
-                "action": f"Failed to configure: {str(e)}"
-            })
+    # NB : on ne déploie QUE sur des clients lancés depuis le répertoire du projet (CLI),
+    # car le serveur suit le cwd. Les clients GUI sans cwd projet (ex. Claude Desktop) sont
+    # volontairement exclus : Effortless y serait privé de projet, donc inutile.
 
     # 2. Claude Code
     claude_code_dir = os.path.expanduser("~/.claude")
