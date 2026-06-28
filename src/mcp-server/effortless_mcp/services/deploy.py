@@ -73,7 +73,7 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
     # projet cible. project_root ne sert qu'à pointer les DONNÉES (env EFFORTLESS_PROJECT_ROOT).
     from effortless_mcp.server import get_install_root
     install_root = get_install_root()
-    source_skill = os.path.join(install_root, "skills", "effortless", "SKILL.md")
+    source_skill = os.path.join(install_root, "src", "skills", "effortless", "SKILL.md")
     mcp_cmd = os.path.join(
         install_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
     )

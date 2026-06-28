@@ -11,3 +11,8 @@ dist/
 .superpowers/
 # État éphémère de la boucle autonome
 .effortless/loop_state.json
+
+# Dogfooding du framework sur lui-même (hors repo public)
+.effortless/
+cadrage/
+effortless.json
