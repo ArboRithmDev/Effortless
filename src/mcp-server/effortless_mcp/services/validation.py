@@ -26,13 +26,24 @@ def validate_document_structure(doc_path: str, doc_rel_path: str, content: str) 
     # 1. Vérification des placeholders.
     # On exige des formes sentinelles explicites (crochets/chevrons) — un « ... » nu en
     # prose ou dans un extrait de code (def f(...)) est légitime et ne doit PAS bloquer.
-    placeholders = [r"\[\.\.\.\]", r"\[à compléter\]", r"\[to complete\]", r"\[insérer", r"<insérer", r"\[insert", r"<insert", r"\bTODO\b", r"\bFIXME\b", r"\bXXX\b"]
-    for pattern in placeholders:
+    # Les sentinelles entre crochets/chevrons tolèrent la casse ; les sentinelles mot-clé
+    # (TODO/FIXME/XXX) sont SENSIBLES à la casse — sinon le statut de tâche légitime `Todo`
+    # (même mot, casse différente) déclencherait un faux positif dans un document valide.
+    bracket_placeholders = [r"\[\.\.\.\]", r"\[à compléter\]", r"\[to complete\]", r"\[insérer", r"<insérer", r"\[insert", r"<insert"]
+    word_placeholders = [r"\bTODO\b", r"\bFIXME\b", r"\bXXX\b"]
+    matched = None
+    for pattern in bracket_placeholders:
         if re.search(pattern, content, re.IGNORECASE):
-            # Ignorer le glossaire qui peut légitimement lister ces termes
-            if "glossaire" not in doc_rel_path.lower():
-                errors.append(f"Unfilled placeholders detected ('{pattern.replace('\\', '')}')")
+            matched = pattern
+            break
+    if matched is None:
+        for pattern in word_placeholders:
+            if re.search(pattern, content):  # sensible à la casse
+                matched = pattern
                 break
+    # Ignorer le glossaire qui peut légitimement lister ces termes
+    if matched is not None and "glossaire" not in doc_rel_path.lower():
+        errors.append(f"Unfilled placeholders detected ('{matched.replace('\\', '')}')")
                 
     # 2. Vérification des sections obligatoires selon le type de document
     doc_lower = doc_rel_path.lower()

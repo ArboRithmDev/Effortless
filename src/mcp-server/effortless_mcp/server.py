@@ -230,7 +230,7 @@ def effortless_init(
     glossary_path = os.path.join(root, "cadrage", "Phase-001", "00-FNC-GLO-glossaire.md")
     if not os.path.exists(glossary_path):
         with open(glossary_path, "w", encoding="utf-8") as f:
-            f.write("---\nphase: O-analyse\nstatut: Actif\n---\n\n# 📓 Glossaire Métier\n\nDéfinissez ici vos termes métiers.\n")
+            f.write("---\nphase: O-analyse\nstatut: Active\n---\n\n# 📓 Domain Glossary\n\nDefine your domain terms here.\n")
 
     return f"Project '{name}' successfully initialized under {root}."
 

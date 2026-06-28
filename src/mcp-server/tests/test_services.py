@@ -91,6 +91,14 @@ def test_validate_document_structure():
     errors = validate_document_structure("/path/to/glossaire.md", "00-FNC-GLO-glossaire.md", "Contenu avec TODO.")
     assert len(errors) == 0
 
+    # Régression : le statut de tâche légitime `Todo` (casse différente) ne doit PAS être
+    # pris pour la sentinelle majuscule TODO (détection mot-clé sensible à la casse).
+    errors = validate_document_structure("/path/to/doc.md", "06-api.md", "Move a task across `Todo`, `Doing`, `Done`.")
+    assert errors == []
+    # Mais la sentinelle en majuscules reste détectée.
+    errors = validate_document_structure("/path/to/doc.md", "06-api.md", "Section TODO non remplie.")
+    assert len(errors) == 1 and "TODO" in errors[0]
+
     # Test sections manquantes pour BQO
     errors = validate_document_structure("/path/to/01-bqo.md", "01-bqo.md", "## Summary Table\n")
     assert len(errors) == 1
