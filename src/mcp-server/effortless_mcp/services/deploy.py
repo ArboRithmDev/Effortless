@@ -74,9 +74,17 @@ def deploy_to_mcp_clients(project_root: str) -> List[Dict[str, Any]]:
     from effortless_mcp.server import get_install_root
     install_root = get_install_root()
     source_skill = os.path.join(install_root, "src", "skills", "effortless", "SKILL.md")
-    mcp_cmd = os.path.join(
-        install_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
-    )
+    # Le script console du venv vit sous Scripts\ (+ suffixe .exe) sur Windows,
+    # et sous bin/ sur POSIX. Chemin résolu selon l'OS pour que la commande
+    # enregistrée chez les clients MCP pointe sur un binaire qui existe.
+    if os.name == "nt":
+        mcp_cmd = os.path.join(
+            install_root, "src", "mcp-server", ".venv", "Scripts", "effortless-mcp.exe"
+        )
+    else:
+        mcp_cmd = os.path.join(
+            install_root, "src", "mcp-server", ".venv", "bin", "effortless-mcp"
+        )
     # Entrée MCP commune aux clients JSON. Pas de pin EFFORTLESS_PROJECT_ROOT : le serveur
     # suit le cwd du client (= le projet courant), comportement agnostique attendu. Le hook
     # CLI et les power-users peuvent toujours forcer la cible via la variable d'env.

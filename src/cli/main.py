@@ -1,6 +1,18 @@
 import os
 import sys
 
+# Sous Windows, le stdout de la console est en cp1252 par défaut : les emojis
+# des messages (⚠️, 🛠️, …) lèvent UnicodeEncodeError et font planter le CLI
+# (notamment le hook anti-drift qui l'appelle en --drift-check-strict).
+# On force UTF-8 UNIQUEMENT sur Windows ; macOS/Linux sont déjà en UTF-8 et
+# restent inchangés.
+if os.name == "nt":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 # Ajouter le chemin de mcp-server/src pour pouvoir importer effortless_mcp
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcp-server")))
 

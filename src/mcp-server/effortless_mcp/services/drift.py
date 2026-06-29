@@ -8,13 +8,21 @@ def get_modified_git_files(project_root: str) -> List[str]:
     Exécute git status pour lister tous les fichiers modifiés, ajoutés ou non suivis.
     """
     try:
-        # Fichiers indexés et non indexés
+        # Fichiers indexés et non indexés.
+        # stdin=DEVNULL est CRITIQUE : sans ça, le git enfant hérite du stdin du
+        # parent. Quand le parent est le serveur MCP stdio (Windows), ce stdin est
+        # le pipe JSON-RPC → deadlock du subprocess (le hang observé uniquement via
+        # le serveur live, jamais en in-process). encoding utf-8 évite le mélange
+        # cp1252 ; timeout garantit une levée plutôt qu'un blocage infini.
         result = subprocess.run(
             ["git", "status", "--porcelain"],
             cwd=project_root,
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
+            timeout=15,
         )
         lines = result.stdout.strip().split("\n")
         modified_files = []
@@ -77,8 +85,18 @@ def install_git_pre_commit_hook(project_root: str) -> str:
     # absolus de l'install. Le CLI déduit le projet à valider via son cwd = repo en cours de commit.
     from effortless_mcp.server import get_install_root
     install_root = get_install_root()
-    install_python = os.path.join(install_root, "src", "mcp-server", ".venv", "bin", "python")
+    # Interpréteur du venv : Scripts\python.exe sur Windows, bin/python sur POSIX.
+    if os.name == "nt":
+        install_python = os.path.join(install_root, "src", "mcp-server", ".venv", "Scripts", "python.exe")
+    else:
+        install_python = os.path.join(install_root, "src", "mcp-server", ".venv", "bin", "python")
     install_cli = os.path.join(install_root, "src", "cli", "main.py")
+
+    # Le hook est un script bash (exécuté par Git Bash sur Windows). On normalise en
+    # slashs avant : Git Bash interprète "C:/.../python.exe", pas les backslashs entre
+    # guillemets. No-op sur POSIX (aucun backslash).
+    install_python = install_python.replace("\\", "/")
+    install_cli = install_cli.replace("\\", "/")
 
     hook_content = f"""#!/bin/bash
 # Hook de pre-commit installé par Effortless pour détecter les dérives de développement (drift)
@@ -104,9 +122,13 @@ exit 0
     with open(hook_path, "w", encoding="utf-8") as f:
         f.write(hook_content)
         
-    # Rendre le hook exécutable
+    # Rendre le hook exécutable (POSIX ; chmod absent sous Windows → exception ignorée).
+    # stdin=DEVNULL : ne pas hériter du pipe JSON-RPC quand spawné depuis le serveur MCP.
     try:
-        subprocess.run(["chmod", "+x", hook_path], check=True)
+        subprocess.run(
+            ["chmod", "+x", hook_path], check=True,
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
+        )
     except Exception:
         pass
         

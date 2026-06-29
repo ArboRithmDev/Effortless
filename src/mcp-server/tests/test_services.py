@@ -335,7 +335,12 @@ def test_deploy_to_mcp_clients(monkeypatch):
         with open(os.path.join(tmpdir, ".claude.json"), encoding="utf-8") as f:
             cc = json.load(f)
         entry = cc["mcpServers"]["effortless"]
-        assert entry["command"].endswith(os.path.join(".venv", "bin", "effortless-mcp"))
+        expected_bin = (
+            os.path.join(".venv", "Scripts", "effortless-mcp.exe")
+            if os.name == "nt"
+            else os.path.join(".venv", "bin", "effortless-mcp")
+        )
+        assert entry["command"].endswith(expected_bin)
         assert "EFFORTLESS_PROJECT_ROOT" not in entry.get("env", {})
 
         # GitHub Copilot -> ~/.copilot/mcp-config.json

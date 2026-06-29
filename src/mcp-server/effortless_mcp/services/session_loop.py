@@ -152,7 +152,9 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
-                timeout=TEST_TIMEOUT_SECONDS
+                timeout=TEST_TIMEOUT_SECONDS,
+                stdin=subprocess.DEVNULL,  # ne pas hériter du pipe JSON-RPC (deadlock MCP/Windows)
+                encoding="utf-8",
             )
             rc = res.returncode
             if rc == 5:
@@ -222,10 +224,19 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                     task["status"] = "Done"
                     save_entity(tasks_dir, task["id"], task)
 
-            # Faire un commit Git automatique
+            # Faire un commit Git automatique.
+            # stdin=DEVNULL + capture_output : sinon git hérite du pipe JSON-RPC du
+            # serveur MCP (deadlock Windows) et écrit sur le stdout du protocole.
             try:
-                subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
-                subprocess.run(["git", "commit", "-m", f"feat: complete task {current_task_id}"], cwd=repo_path, check=True)
+                subprocess.run(
+                    ["git", "add", "."], cwd=repo_path, check=True,
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", f"feat: complete task {current_task_id}"],
+                    cwd=repo_path, check=True,
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
+                )
                 git_msg = "Changes committed to Git."
             except Exception as e:
                 git_msg = f"Failed to commit: {str(e)} (already committed?)"
