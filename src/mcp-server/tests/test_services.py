@@ -690,3 +690,69 @@ def test_get_paths_exposes_epics_and_stories(tmp_path):
     assert "stories" in paths
     assert paths["epics"].endswith("epics")
     assert paths["stories"].endswith("stories")
+
+
+def test_new_epic_id():
+    from effortless_mcp.server import new_epic_id
+    assert new_epic_id("core") == "EPIC-CORE"
+
+
+def test_get_story_paths_nested_layout(tmp_path):
+    from effortless_mcp.server import get_story_paths
+    root = str(tmp_path)
+    paths = get_story_paths(root, "EPIC-CORE", "STO-CORE-01")
+    expected_tasks = os.path.join(
+        ".effortless", "epics", "EPIC-CORE", "stories", "STO-CORE-01", "tasks"
+    )
+    assert paths["tasks"].endswith(expected_tasks)
+    assert paths["story"].endswith("story.json")
+
+
+def test_new_story_id_sequence_per_epic(tmp_path):
+    from effortless_mcp.server import new_story_id
+    root = str(tmp_path)
+    os.makedirs(
+        os.path.join(root, ".effortless", "epics", "EPIC-CORE", "stories", "STO-CORE-01"),
+        exist_ok=True,
+    )
+    assert new_story_id(root, "EPIC-CORE", "CORE") == "STO-CORE-02"
+
+
+def test_get_active_story_nested(tmp_path):
+    from effortless_mcp.server import get_active_story
+    root = str(tmp_path)
+    eff_dir = os.path.join(root, ".effortless")
+    story_dir = os.path.join(eff_dir, "epics", "EPIC-CORE", "stories", "STO-CORE-01")
+    os.makedirs(story_dir, exist_ok=True)
+
+    with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x",
+            "current_phase": "L-plan",
+            "active_epic_id": "EPIC-CORE",
+            "active_story_id": "STO-CORE-01",
+            "started_at": "t",
+            "completed_phases": [],
+        }, f)
+    with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "id": "STO-CORE-01",
+            "epic_id": "EPIC-CORE",
+            "title": "x",
+            "opale_phase": "A-specs",
+        }, f)
+
+    assert get_active_story(root)["opale_phase"] == "A-specs"
+
+    # Sans pointeurs actifs -> None.
+    other_root = os.path.join(root, "no-active")
+    other_eff = os.path.join(other_root, ".effortless")
+    os.makedirs(other_eff, exist_ok=True)
+    with open(os.path.join(other_eff, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x",
+            "current_phase": "L-plan",
+            "started_at": "t",
+            "completed_phases": [],
+        }, f)
+    assert get_active_story(other_root) is None
