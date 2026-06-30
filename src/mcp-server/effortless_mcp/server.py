@@ -140,8 +140,7 @@ def get_active_story(root: str) -> Optional[Dict[str, Any]]:
     """Retourne la Story active depuis l'arbre nested epics/<EPIC>/stories/<STORY>/.
 
     Designee par state.active_epic_id + state.active_story_id ; sa fiche est le
-    story.json dans get_story_dir(...). Sans pointeurs ou sans fiche, retourne None
-    (le moteur retombe sur le current_phase global transitoire, cf. resolve_active_phase).
+    story.json dans get_story_dir(...). Sans pointeurs ou sans fiche, retourne None.
     """
     paths = get_paths(root)
     if not os.path.exists(paths["state"]):
@@ -166,21 +165,11 @@ def get_active_story(root: str) -> Optional[Dict[str, Any]]:
 
 
 def resolve_active_phase(root: str) -> Optional[str]:
-    """Phase OPALE faisant autorité : opale_phase de la Story active.
-
-    Fallback transitoire sur state.current_phase tant que la bascule des
-    consommateurs n'est pas terminée (sera retiré en fin de migration big-bang)."""
+    """Phase OPALE faisant autorité : opale_phase de la Story active."""
     story = get_active_story(root)
     if story is not None and story.get("opale_phase"):
         return story["opale_phase"]
-    paths = get_paths(root)
-    if not os.path.exists(paths["state"]):
-        return None
-    try:
-        with open(paths["state"], "r", encoding="utf-8") as f:
-            return json.load(f).get("current_phase")
-    except (json.JSONDecodeError, OSError):
-        return None
+    return None
 
 
 # --- Couche stockage fractal (DEC-22/23) : nested epics/<EPIC>/stories/<STORY>/ ---
@@ -254,7 +243,6 @@ def effortless_init(
     config = EffortlessConfig(
         project=ProjectMeta(name=name, description=description, version="0.1.0"),
         workflow=WorkflowConfig(
-            current_phase="O-analyse",
             phases=[
                 PhaseConfig(
                     id="O-analyse",
@@ -330,7 +318,6 @@ def effortless_init(
     # Initialisation de state.json (avec pointeurs vers la Story active fractale)
     state = ProjectState(
         project_name=name,
-        current_phase="O-analyse",
         active_epic_id="EPIC-PROJET",
         active_story_id="STO-PROJET-01",
         started_at=_utc_now_iso()
@@ -380,7 +367,7 @@ def effortless_status() -> str:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
 
     # Trouver la phase de configuration correspondante
@@ -443,7 +430,7 @@ def effortless_phase_next() -> str:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
 
@@ -489,17 +476,8 @@ def effortless_phase_next() -> str:
         )
         save_entity(story_paths["dir"], "story", active_story)
 
-    # Repli transitoire : on maintient aussi current_phase global (retiré ultérieurement).
-    state_data["current_phase"] = next_phase["id"]
-
     with open(paths["state"], "w", encoding="utf-8") as f:
         json.dump(state_data, f, indent=2, ensure_ascii=False)
-
-    # C3 : garder effortless.json en phase avec state.json (sinon le config conserve une
-    # phase morte que les consommateurs externes — Web UI — afficheraient à tort).
-    config_data.setdefault("workflow", {})["current_phase"] = next_phase["id"]
-    with open(paths["config"], "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=2, ensure_ascii=False)
 
     # --- Symbiose SecondBrain ---
     project_slug = state_data.get("project_name", "effortless").lower()
@@ -549,7 +527,7 @@ def effortless_decision_add(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
 
     decisions = load_entities(paths["decisions"])
@@ -624,7 +602,7 @@ def effortless_question_ask(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
     project_name = state_data.get("project_name")
 
@@ -766,7 +744,7 @@ def effortless_task_add(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
 
     # Modèle fractal : si une Story est active, la tâche est créée dans SON sous-registre
@@ -902,7 +880,7 @@ def effortless_secondbrain_sync() -> str:
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
     project_slug = state_data.get("project_name", "effortless").lower()
 
@@ -1016,7 +994,7 @@ def build_project_overview(root: str) -> Dict[str, Any]:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
     phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)

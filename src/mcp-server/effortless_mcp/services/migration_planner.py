@@ -28,8 +28,8 @@ def _render_migration_preview(config: Dict[str, Any], tasks: List[Dict[str, Any]
     lines = ["🔬 MIGRATION PREVIEW (dry-run — nothing was written)\n"]
     lines.append(f"Target project: {config['project']['name']}")
     lines.append(
-        f"Target workflow: {config['workflow']['current_phase']} "
-        f"({len(config['workflow']['phases'])} migration phases)"
+        f"Target workflow: {len(config['workflow']['phases'])} migration phases "
+        f"(migration story opale_phase M-observe)"
     )
     lines.append("Migration Epic/Story: EPIC-MIGRATION › STO-MIGRATION-01 (opale_phase M-observe)")
     lines.append(f"Migration tasks to create: {len(tasks)}")
@@ -67,7 +67,6 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
             "version": "0.1.0"
         },
         "workflow": {
-            "current_phase": "M-observe",
             "phases": [
                 {
                     "id": "M-observe",
@@ -120,7 +119,6 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
     # 2. État cible (state.json)
     state = {
         "project_name": config["project"]["name"],
-        "current_phase": "M-observe",            # keep (transitional fallback)
         "active_epic_id": "EPIC-MIGRATION",      # NEW
         "active_story_id": "STO-MIGRATION-01",   # NEW
         "started_at": "2026-06-28T18:00:00Z",
