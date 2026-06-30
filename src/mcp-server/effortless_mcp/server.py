@@ -135,6 +135,46 @@ def save_entity(dir_path: str, entity_id: str, entity_data: Dict[str, Any]) -> N
         json.dump(entity_data, f, indent=2, ensure_ascii=False)
 
 
+def get_active_story(root: str) -> Optional[Dict[str, Any]]:
+    """Retourne la Story active (celle dont opale_phase fait foi) ou None.
+
+    La Story active est désignée par state.active_story_id ; sa fiche vit dans
+    paths['stories']. Sans pointeur ou sans fiche, retourne None (le moteur
+    retombe alors sur le current_phase global transitoire — cf. resolve_active_phase).
+    """
+    paths = get_paths(root)
+    if not os.path.exists(paths["state"]):
+        return None
+    try:
+        with open(paths["state"], "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    story_id = state_data.get("active_story_id")
+    if not story_id:
+        return None
+    stories = load_entities(paths["stories"])
+    return next((s for s in stories if s.get("id") == story_id), None)
+
+
+def resolve_active_phase(root: str) -> Optional[str]:
+    """Phase OPALE faisant autorité : opale_phase de la Story active.
+
+    Fallback transitoire sur state.current_phase tant que la bascule des
+    consommateurs n'est pas terminée (sera retiré en fin de migration big-bang)."""
+    story = get_active_story(root)
+    if story is not None and story.get("opale_phase"):
+        return story["opale_phase"]
+    paths = get_paths(root)
+    if not os.path.exists(paths["state"]):
+        return None
+    try:
+        with open(paths["state"], "r", encoding="utf-8") as f:
+            return json.load(f).get("current_phase")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 # --- 1. Outils d'Initialisation & Statut ---
 
 @mcp.tool()
