@@ -346,8 +346,9 @@ def effortless_status() -> str:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    current_phase_id = state_data.get("current_phase")
-    
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
+
     # Trouver la phase de configuration correspondante
     phases_list = config_data.get("workflow", {}).get("phases", [])
     phase_config = next((p for p in phases_list if p["id"] == current_phase_id), None)
@@ -408,9 +409,10 @@ def effortless_phase_next() -> str:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
-    
+
     # Trouver l'index de la phase en cours
     current_idx = next((i for i, p in enumerate(phases_list) if p["id"] == current_phase_id), -1)
 
@@ -443,6 +445,17 @@ def effortless_phase_next() -> str:
             "id": current_phase_id,
             "completed_at": _utc_now_iso()
         })
+    # Modèle fractal : si une Story est active, c'est SA phase OPALE qui avance.
+    # On persiste le nouveau palier dans son story.json (source de vérité fractale).
+    active_story = get_active_story(root)
+    if active_story is not None:
+        active_story["opale_phase"] = next_phase["id"]
+        story_paths = get_story_paths(
+            root, state_data.get("active_epic_id"), state_data.get("active_story_id")
+        )
+        save_entity(story_paths["dir"], "story", active_story)
+
+    # Repli transitoire : on maintient aussi current_phase global (retiré ultérieurement).
     state_data["current_phase"] = next_phase["id"]
 
     with open(paths["state"], "w", encoding="utf-8") as f:
@@ -502,7 +515,8 @@ def effortless_decision_add(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
 
     decisions = load_entities(paths["decisions"])
 
@@ -576,7 +590,8 @@ def effortless_question_ask(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
     project_name = state_data.get("project_name")
 
     questions = load_entities(paths["questions"])
@@ -717,23 +732,36 @@ def effortless_task_add(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
 
-    tasks = load_entities(paths["tasks"])
-
-    # Déterminer le préfixe basé sur la phase active
-    parts = current_phase_id.split("-")
-    if len(parts) >= 3 and parts[0].lower() == "phase":
-        prefix = "-".join(parts[:3])
-    elif len(parts) >= 1:
-        prefix = parts[0]
+    # Modèle fractal : si une Story est active, la tâche est créée dans SON sous-registre
+    # tasks/ avec un ID séquentiel par Story (TSK-NN). Sinon, comportement global historique.
+    active_story = get_active_story(root)
+    if active_story is not None:
+        story_paths = get_story_paths(
+            root, state_data.get("active_epic_id"), state_data.get("active_story_id")
+        )
+        tasks_dir = story_paths["tasks"]
+        tasks = load_entities(tasks_dir)
+        tsk_id = new_entity_id(tasks_dir, "TSK-")
     else:
-        prefix = "TSK"
+        tasks_dir = paths["tasks"]
+        tasks = load_entities(tasks_dir)
 
-    # ID = max existant pour CE préfixe + 1 : préfixe et index restent cohérents, et la
-    # suppression d'une tâche ne provoque ni réutilisation ni écrasement (B1/B5).
-    tsk_prefix = f"TSK-{prefix}-"
-    tsk_id = next_sequential_id([t.get("id", "") for t in tasks], tsk_prefix)
+        # Déterminer le préfixe basé sur la phase active
+        parts = current_phase_id.split("-")
+        if len(parts) >= 3 and parts[0].lower() == "phase":
+            prefix = "-".join(parts[:3])
+        elif len(parts) >= 1:
+            prefix = parts[0]
+        else:
+            prefix = "TSK"
+
+        # ID = max existant pour CE préfixe + 1 : préfixe et index restent cohérents, et la
+        # suppression d'une tâche ne provoque ni réutilisation ni écrasement (B1/B5).
+        tsk_prefix = f"TSK-{prefix}-"
+        tsk_id = next_sequential_id([t.get("id", "") for t in tasks], tsk_prefix)
 
     new_task = Task(
         id=tsk_id,
@@ -749,7 +777,7 @@ def effortless_task_add(
     tasks.append(new_task_dump)
 
     # Sauvegarde JSON individuelle
-    save_entity(paths["tasks"], tsk_id, new_task_dump)
+    save_entity(tasks_dir, tsk_id, new_task_dump)
 
     return f"Task {tsk_id} created ('{title}') for phase {current_phase_id}."
 
@@ -832,7 +860,8 @@ def effortless_secondbrain_sync() -> str:
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
     project_slug = state_data.get("project_name", "effortless").lower()
 
     vault_path = get_secondbrain_vault_path()
@@ -945,7 +974,8 @@ def build_project_overview(root: str) -> Dict[str, Any]:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active, sinon current_phase global.
+    current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
     phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
     required_docs = phase_cfg.get("required_documents", []) if phase_cfg else []
