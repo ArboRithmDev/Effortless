@@ -563,24 +563,33 @@ def effortless_decision_add(
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
     
-    # Rechercher s'il y a un document de type DEC requis dans la phase
+    # Rechercher s'il y a un document de type DEC requis dans la phase (pour le NOM de fichier)
     phases_list = config_data.get("workflow", {}).get("phases", [])
     current_phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
-    docs_dir = resolve_phase_docs_dir(current_phase_cfg, config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001"))
+    settings_documents_dir = config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001")
 
-    dec_doc_rel = None
+    # Le repertoire fait autorite via la Story active (DEC-23) -> chemin ABSOLU ;
+    # sinon repli phase-scope (chemin RELATIF a prefixer par root).
+    story = get_active_story(root)
+    if story is not None:
+        docs_abs = resolve_phase_docs_dir_nested(root, story["epic_id"], story["id"])
+    else:
+        docs_abs = os.path.join(root, resolve_phase_docs_dir(current_phase_cfg, settings_documents_dir))
+
+    dec_filename = None
     if current_phase_cfg:
         for doc in current_phase_cfg.get("required_documents", []):
             if "dec" in doc.lower() or "decision" in doc.lower():
-                dec_doc_rel = doc
+                dec_filename = os.path.basename(doc)
                 break
 
-    if not dec_doc_rel:
-        dec_doc_rel = f"{docs_dir}/03-MET-DEC-registre-decisions.md"
+    if not dec_filename:
+        dec_filename = "03-MET-DEC-registre-decisions.md"
 
-    markdown_path = os.path.join(root, dec_doc_rel)
+    markdown_path = os.path.join(docs_abs, dec_filename)
     sync_decisions_to_markdown(markdown_path, current_phase_id, decisions)
 
+    dec_doc_rel = os.path.relpath(markdown_path, root).replace(os.sep, "/")
     return f"Decision {dec_id} added and synced to {dec_doc_rel}."
 
 # --- 3. Outils de Questions (BQO) ---
@@ -638,23 +647,32 @@ def effortless_question_ask(
     
     phases_list = config_data.get("workflow", {}).get("phases", [])
     current_phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
-    docs_dir = resolve_phase_docs_dir(current_phase_cfg, config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001"))
+    settings_documents_dir = config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001")
 
-    bqo_doc_rel = None
+    # Le repertoire fait autorite via la Story active (DEC-23) -> chemin ABSOLU ;
+    # sinon repli phase-scope (chemin RELATIF a prefixer par root).
+    story = get_active_story(root)
+    if story is not None:
+        docs_abs = resolve_phase_docs_dir_nested(root, story["epic_id"], story["id"])
+    else:
+        docs_abs = os.path.join(root, resolve_phase_docs_dir(current_phase_cfg, settings_documents_dir))
+
+    bqo_filename = None
     if current_phase_cfg:
         for doc in current_phase_cfg.get("required_documents", []):
             if "bqo" in doc.lower() or "question" in doc.lower():
-                bqo_doc_rel = doc
+                bqo_filename = os.path.basename(doc)
                 break
 
-    if not bqo_doc_rel:
-        bqo_doc_rel = f"{docs_dir}/02-BQO-questions.md"
+    if not bqo_filename:
+        bqo_filename = "02-BQO-questions.md"
 
-    markdown_path = os.path.join(root, bqo_doc_rel)
+    markdown_path = os.path.join(docs_abs, bqo_filename)
     # Ne synchroniser que les questions de la phase en cours pour le fichier de phase
     phase_questions = [q for q in questions if q.get("phase") == current_phase_id]
     sync_questions_to_markdown(markdown_path, current_phase_id, project_name, phase_questions)
 
+    bqo_doc_rel = os.path.relpath(markdown_path, root).replace(os.sep, "/")
     return f"Question {q_id} submitted and synced to {bqo_doc_rel}."
 
 @mcp.tool()

@@ -1057,3 +1057,50 @@ def test_task_add_uses_active_story_phase(monkeypatch):
         assert not os.path.exists(
             os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json")
         )
+
+
+def test_decision_add_syncs_under_active_story_docs_dir(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_decision_add(
+            title="Choix du stockage",
+            context="On hésite entre A et B.",
+            decision="On prend A.",
+            consequences=["Moins de latence"],
+        )
+
+        # Le Markdown des décisions atterrit dans le dossier cadrage scopé Story.
+        story_docs_dir = os.path.join(
+            tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01"
+        )
+        md_path = os.path.join(story_docs_dir, "03-MET-DEC-registre-decisions.md")
+        assert os.path.exists(md_path)
+        # Pas de double-préfixe root (pas de cadrage/.../cadrage/...).
+        assert "cadrage/EPIC-PROJET/STO-PROJET-01/" in msg.replace(os.sep, "/")
+        assert msg.count("cadrage") == 1
+
+
+def test_question_ask_syncs_under_active_story_docs_dir(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_question_ask(
+            question="Quel format pour l'export ?",
+            context="L'export doit être interopérable.",
+            impact="Structuring",
+        )
+
+        # Le Markdown du BQO atterrit dans le dossier cadrage scopé Story.
+        story_docs_dir = os.path.join(
+            tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01"
+        )
+        md_path = os.path.join(story_docs_dir, "02-BQO-questions.md")
+        assert os.path.exists(md_path)
+        # Pas de double-préfixe root (pas de cadrage/.../cadrage/...).
+        assert "cadrage/EPIC-PROJET/STO-PROJET-01/" in msg.replace(os.sep, "/")
+        assert msg.count("cadrage") == 1
