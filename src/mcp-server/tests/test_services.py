@@ -63,23 +63,57 @@ def test_validate_phase_documents():
         )
         assert not is_valid
 
-        # 3. Présents et corrects (mais BQO non résolu par son statut)
+        # 3. Présents et corrects. Gate impact-aware (L-04) : un BQO « En attente »
+        #    SANS question Blocker ouverte ne bloque PLUS la transition. Le document
+        #    reste signalé (⚠️ non valide) mais l'éligibilité de phase reste verte.
         write_markdown_frontmatter(doc1_path, {"phase": "O-analyse", "statut": "Actif"}, "# Test")
         write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "En attente"}, "## Summary Table\n## Question Details\n")
 
         is_valid, checklist, reasons = validate_phase_documents(
             tmpdir, current_phase_id, required_documents, questions_path
         )
-        assert not is_valid
-        assert any("Unresolved BQO" in r for r in reasons)
+        assert is_valid
+        assert len(reasons) == 0
+        # Le BQO non clôturé est tout de même remonté comme avertissement non bloquant.
+        bqo_item = next(c for c in checklist if c["document_path"].endswith("01-bqo.md"))
+        assert not bqo_item["is_valid"]
+        assert any("not resolved" in e for e in bqo_item["errors"])
 
-        # 4. Résolu
+        # 3b. Une question d'impact Blocker NON résolue de la phase bloque la transition.
+        with open(questions_path, "w", encoding="utf-8") as f:
+            json.dump([
+                {"id": "Q-01", "question": "Choix moteur ?", "phase": "O-analyse",
+                 "impact": "Blocker", "status": "Pending"}
+            ], f)
+        is_valid, checklist, reasons = validate_phase_documents(
+            tmpdir, current_phase_id, required_documents, questions_path
+        )
+        assert not is_valid
+        assert any("Unresolved blocking question" in r and "Q-01" in r for r in reasons)
+
+        # 3c. Une question d'impact faible (Structuring) ouverte ne bloque PAS.
+        with open(questions_path, "w", encoding="utf-8") as f:
+            json.dump([
+                {"id": "Q-02", "question": "Renommer le module ?", "phase": "O-analyse",
+                 "impact": "Structuring", "status": "Pending"}
+            ], f)
+        is_valid, checklist, reasons = validate_phase_documents(
+            tmpdir, current_phase_id, required_documents, questions_path
+        )
+        assert is_valid
+        assert len(reasons) == 0
+
+        # 4. BQO clôturé (statut Résolu) + aucune question bloquante → vert et sans warning.
+        with open(questions_path, "w", encoding="utf-8") as f:
+            json.dump([], f)
         write_markdown_frontmatter(doc2_path, {"phase": "O-analyse", "statut": "Résolu"}, "## Summary Table\n## Question Details\n")
         is_valid, checklist, reasons = validate_phase_documents(
             tmpdir, current_phase_id, required_documents, questions_path
         )
         assert is_valid
         assert len(reasons) == 0
+        bqo_item = next(c for c in checklist if c["document_path"].endswith("01-bqo.md"))
+        assert bqo_item["is_valid"]
 
 def test_validate_document_structure():
     # Test placeholders
