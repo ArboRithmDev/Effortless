@@ -756,3 +756,50 @@ def test_get_active_story_nested(tmp_path):
             "completed_phases": [],
         }, f)
     assert get_active_story(other_root) is None
+
+
+def test_migrate_state_to_fractal_scaffold():
+    from effortless_mcp.services.state_migrator import migrate_state_to_fractal
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        eff_dir = os.path.join(tmpdir, ".effortless")
+        os.makedirs(eff_dir)
+        state_path = os.path.join(eff_dir, "state.json")
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "project_name": "effortless",
+                "current_phase": "L-plan",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_phases": [],
+            }, f)
+
+        epic_path = os.path.join(eff_dir, "epics", "EPIC-PROJET", "epic.json")
+        story_path = os.path.join(
+            eff_dir, "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "story.json"
+        )
+
+        # 1. Dry-run (défaut) : aperçu non destructif, rien n'est écrit.
+        preview = migrate_state_to_fractal(tmpdir)
+        assert "PREVIEW" in preview
+        assert not os.path.exists(epic_path)
+        assert not os.path.exists(story_path)
+
+        # 2. Réel : scaffolde Epic + Story et positionne les pointeurs.
+        report = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "EPIC-PROJET" in report and "STO-PROJET-01" in report
+        assert os.path.exists(epic_path)
+        assert os.path.exists(story_path)
+
+        with open(story_path, encoding="utf-8") as f:
+            story = json.load(f)
+        assert story["opale_phase"] == "L-plan"
+
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["active_epic_id"] == "EPIC-PROJET"
+        assert state["active_story_id"] == "STO-PROJET-01"
+        assert state["current_phase"] == "L-plan"  # conservé (fallback transitoire)
+
+        # 3. Idempotence : un second passage réel ne plante pas et ne réécrit rien.
+        again = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "Already migrated" in again
