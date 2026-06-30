@@ -28,9 +28,12 @@ class QueueTracker:
     """Adapter Jira médié. `create` enqueue une op et retourne `local:N` ; l'agent
     résout les vraies clés via Rovo puis ack."""
 
-    def __init__(self, journal, levelmap: Optional[dict] = None):
+    def __init__(self, journal, levelmap: Optional[dict] = None, taxonomy: Optional[dict] = None):
         self._journal = journal
         self._levelmap = levelmap or dict(_LEVELMAP)
+        # taxonomy: {level -> issue_type_id} (médiée, persistée dans settings.tracker.taxonomy).
+        # Vide tant que le discover médié n'a pas été acké → issue_type_id=None (fallback nom).
+        self._taxonomy = taxonomy or {}
         self._seq = 0
 
     def discover_taxonomy(self, project: ProjectRef) -> Taxonomy:
@@ -45,6 +48,7 @@ class QueueTracker:
             "local_id": local_id,
             "level": payload.level,
             "issue_type_name": self._levelmap.get(payload.level, payload.level),
+            "issue_type_id": self._taxonomy.get(payload.level),  # id autoritaire (None si pas de discover)
             "title": payload.title,
             "parent_local_id": parent_local,
             "labels": list(payload.labels or []),
@@ -66,7 +70,8 @@ def build_queue_tracker(cfg: dict) -> QueueTracker:
     projet injectée par `resolve_tracker(..., root)` sous `__root__`. Fallback cwd
     pour les usages où seule la résolution de type importe (ex. is_coupled)."""
     from effortless_mcp.ports.sync_journal import SyncJournal
-    return QueueTracker(SyncJournal(cfg.get("__root__") or "."))
+    # `taxonomy` (level→id) vient de settings.tracker.taxonomy (discover médié, STO-TRACKER-04).
+    return QueueTracker(SyncJournal(cfg.get("__root__") or "."), taxonomy=cfg.get("taxonomy") or {})
 
 
 # Effet de bord d'import : « jira » résoluble en mode médié.
