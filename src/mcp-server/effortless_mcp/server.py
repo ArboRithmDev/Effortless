@@ -1373,41 +1373,26 @@ def effortless_migrate_state(confirm: bool = False) -> str:
         return f"Error migrating state to fractal model: {str(e)}"
 
 @mcp.tool()
-def effortless_tracker_couple(type: str, project_id: str, project_url: str, base_url: str = "") -> str:
+def effortless_tracker_couple(type: str, project_id: str, project_url: str) -> str:
     """
-    Couple le projet Effortless à un projet du tracker (settings.tracker) et,
-    pour Jira, résout la taxonomie réelle (types + transitions).
+    Couple le projet Effortless à un projet du tracker (settings.tracker).
 
-    Credentials Jira jamais stockés en clair : `JIRA_BASE_URL` (ou `base_url`),
-    `JIRA_EMAIL`, `JIRA_API_TOKEN` sont lus depuis l'environnement à la résolution.
+    Projection médiée par l'agent (STO-TRACKER-03) : aucun credential stocké ni lu.
+    L'exécution Jira passe par le connecteur Rovo MCP côté agent (voir disclaimer).
     """
     root = get_project_root()
     paths = get_paths(root)
     if not os.path.exists(paths["config"]):
         return "Error: Project not initialized."
 
+    from effortless_mcp.ports import ROVO_DISCLAIMER
     from effortless_mcp.ports.integration import couple_project
     couple_project(root, type, project_id, project_url)
-
-    # Persiste base_url dans settings.tracker (les secrets restent en env).
-    with open(paths["config"], "r", encoding="utf-8") as f:
-        config_data = json.load(f)
-    tracker_cfg = config_data.setdefault("settings", {}).setdefault("tracker", {})
-    if base_url:
-        tracker_cfg["base_url"] = base_url
-    with open(paths["config"], "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=2, ensure_ascii=False)
-
-    msg = f"Project coupled to {type} project '{project_id}' ({project_url})."
-    if type == "jira":
-        from effortless_mcp.ports import resolve_tracker, ProjectRef
-        try:
-            tracker = resolve_tracker(config_data.get("settings"))
-            tax = tracker.discover_taxonomy(ProjectRef(project_id, project_url))
-            msg += f" Taxonomy resolved: types={tax.issue_types}, transitions={tax.transitions}."
-        except Exception as e:
-            msg += f" (discover_taxonomy deferred — credentials/réseau ? {e})"
-    return msg
+    return (
+        f"{ROVO_DISCLAIMER}\n\n"
+        f"Projet couplé au tracker {type} '{project_id}' ({project_url}). "
+        f"Aucun credential requis (projection médiée Rovo)."
+    )
 
 
 @mcp.tool()
@@ -1425,13 +1410,14 @@ def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira
     with open(paths["config"], "r", encoding="utf-8") as f:
         config_data = json.load(f)
 
-    from effortless_mcp.ports import resolve_tracker, ProjectRef
+    from effortless_mcp.ports import resolve_tracker, ProjectRef, ROVO_DISCLAIMER, NullTracker
     from effortless_mcp.services.scaffolder import scaffold_project_from_template
     from effortless_mcp.services.scaffold_state import ScaffoldState
     from effortless_mcp.templates import load_scaffold_template
 
     settings = config_data.get("settings") or {}
-    tracker = resolve_tracker(settings)
+    # root injecté : l'adapter médié (QueueTracker) écrit l'outbox sous <root>/.effortless/.
+    tracker = resolve_tracker(settings, root)
     tcfg = settings.get("tracker") or {}
     project_ref = ProjectRef(tcfg.get("project_id", ""), tcfg.get("project_url", ""))
     try:
@@ -1439,13 +1425,25 @@ def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira
     except OSError as e:
         return f"Error: template '{template_name}' introuvable ({e})."
 
+    state = ScaffoldState(root)
+    already = state.has(zone)
     try:
-        refs = scaffold_project_from_template(tracker, project_ref, template, zone, ScaffoldState(root))
+        refs = scaffold_project_from_template(tracker, project_ref, template, zone, state)
     except Exception as e:
         return f"Error during scaffold: {e}"
 
-    nodes = ", ".join(f"{k} → {v['tracker_id'] or '(no-op)'}" for k, v in refs.items())
-    return f"Scaffold '{zone}' : {len(refs)} nœud(s). {nodes}"
+    if isinstance(tracker, NullTracker):
+        return f"Projet non couplé : aucune projection (no-op). {len(refs)} nœud(s) ignorés."
+    if already:
+        return (
+            f"{ROVO_DISCLAIMER}\n\n"
+            f"Zone '{zone}' déjà scaffoldée ({len(refs)} refs connues). Rien à exécuter (idempotent)."
+        )
+    return (
+        f"{ROVO_DISCLAIMER}\n\n"
+        f"Scaffold '{zone}' planifié : {len(refs)} op(s) en attente. "
+        f"Exécute via effortless_tracker_pending (Rovo), puis effortless_tracker_ack."
+    )
 
 
 @mcp.tool()
