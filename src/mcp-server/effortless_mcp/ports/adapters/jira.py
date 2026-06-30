@@ -43,8 +43,9 @@ class JiraTracker:
         types = self._client.get_issue_types(self._project_key)
         issue_types = {}
         for level, predicate in (
-            ("epic", lambda t: not t.get("subtask") and t.get("hierarchyLevel") == 1),
-            ("story", lambda t: not t.get("subtask") and t.get("name", "").lower() == "story"),
+            # Robuste aux shapes réels : hierarchyLevel parfois absent → repli sur le nom.
+            ("epic", lambda t: not t.get("subtask") and (t.get("hierarchyLevel") == 1 or (t.get("name") or "").lower() == "epic")),
+            ("story", lambda t: not t.get("subtask") and (t.get("name") or "").lower() == "story"),
             ("task", lambda t: bool(t.get("subtask"))),
         ):
             match = next((t for t in types if predicate(t)), None)
