@@ -136,11 +136,11 @@ def save_entity(dir_path: str, entity_id: str, entity_data: Dict[str, Any]) -> N
 
 
 def get_active_story(root: str) -> Optional[Dict[str, Any]]:
-    """Retourne la Story active (celle dont opale_phase fait foi) ou None.
+    """Retourne la Story active depuis l'arbre nested epics/<EPIC>/stories/<STORY>/.
 
-    La Story active est désignée par state.active_story_id ; sa fiche vit dans
-    paths['stories']. Sans pointeur ou sans fiche, retourne None (le moteur
-    retombe alors sur le current_phase global transitoire — cf. resolve_active_phase).
+    Designee par state.active_epic_id + state.active_story_id ; sa fiche est le
+    story.json dans get_story_dir(...). Sans pointeurs ou sans fiche, retourne None
+    (le moteur retombe sur le current_phase global transitoire, cf. resolve_active_phase).
     """
     paths = get_paths(root)
     if not os.path.exists(paths["state"]):
@@ -150,11 +150,18 @@ def get_active_story(root: str) -> Optional[Dict[str, Any]]:
             state_data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
+    epic_id = state_data.get("active_epic_id")
     story_id = state_data.get("active_story_id")
-    if not story_id:
+    if not epic_id or not story_id:
         return None
-    stories = load_entities(paths["stories"])
-    return next((s for s in stories if s.get("id") == story_id), None)
+    story_file = get_story_paths(root, epic_id, story_id)["story"]
+    if not os.path.exists(story_file):
+        return None
+    try:
+        with open(story_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def resolve_active_phase(root: str) -> Optional[str]:
