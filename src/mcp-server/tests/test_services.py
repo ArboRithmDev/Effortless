@@ -794,6 +794,49 @@ def test_get_active_story_nested(tmp_path):
     assert get_active_story(other_root) is None
 
 
+def test_story_scoped_required_docs(tmp_path):
+    # Finding dogfood : la barrière de phase doit valider les documents de la
+    # Story ACTIVE, pas ceux pinés sur la première Story par effortless.json.
+    from effortless_mcp.server import story_scoped_required_docs
+    root = str(tmp_path)
+    eff_dir = os.path.join(root, ".effortless")
+    story_dir = os.path.join(eff_dir, "epics", "EPIC-TRACKER", "stories", "STO-TRACKER-01")
+    os.makedirs(story_dir, exist_ok=True)
+    with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x", "current_phase": "O-analyse",
+            "active_epic_id": "EPIC-TRACKER", "active_story_id": "STO-TRACKER-01",
+            "started_at": "t", "completed_phases": [],
+        }, f)
+    with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "id": "STO-TRACKER-01", "epic_id": "EPIC-TRACKER",
+            "title": "x", "opale_phase": "O-analyse",
+        }, f)
+
+    # Le workflow déclare des chemins pinés sur une AUTRE Story (la première).
+    phase_cfg = {"id": "O-analyse", "required_documents": [
+        "cadrage/EPIC-PROJET/STO-PROJET-01/00-FNC-GLO-glossaire.md",
+        "cadrage/EPIC-PROJET/STO-PROJET-01/02-BQO-questions.md",
+    ]}
+    # Rebasculés sur la Story active, basename conservé.
+    assert story_scoped_required_docs(root, phase_cfg) == [
+        os.path.join("cadrage", "EPIC-TRACKER", "STO-TRACKER-01", "00-FNC-GLO-glossaire.md"),
+        os.path.join("cadrage", "EPIC-TRACKER", "STO-TRACKER-01", "02-BQO-questions.md"),
+    ]
+
+    # Sans Story active -> chemins du workflow inchangés (compat legacy plat).
+    other_root = os.path.join(root, "no-active")
+    os.makedirs(os.path.join(other_root, ".effortless"), exist_ok=True)
+    with open(os.path.join(other_root, ".effortless", "state.json"), "w", encoding="utf-8") as f:
+        json.dump({"project_name": "x", "current_phase": "O-analyse",
+                   "started_at": "t", "completed_phases": []}, f)
+    assert story_scoped_required_docs(other_root, phase_cfg) == phase_cfg["required_documents"]
+
+    # phase_cfg absente -> liste vide.
+    assert story_scoped_required_docs(root, None) == []
+
+
 def test_migrate_state_to_fractal_scaffold():
     from effortless_mcp.services.state_migrator import migrate_state_to_fractal
 
