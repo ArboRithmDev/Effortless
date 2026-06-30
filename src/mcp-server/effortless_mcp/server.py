@@ -219,6 +219,15 @@ def resolve_phase_docs_dir_nested(root: str, epic_id: str, story_id: str, docume
     return os.path.join(root, documents_root, epic_id, story_id)
 
 
+def resolve_registry_dir(root: str, kind: str) -> str:
+    """Dossier d'un registre d'entités (kind in {'tasks','decisions','questions'}) :
+    sous-registre de la Story active si présente, sinon repli sur le registre global plat."""
+    story = get_active_story(root)
+    if story is not None:
+        return get_story_paths(root, story["epic_id"], story["id"])[kind]
+    return get_paths(root)[kind]
+
+
 # --- 1. Outils d'Initialisation & Statut ---
 
 @mcp.tool()
@@ -383,18 +392,21 @@ def effortless_status() -> str:
         return f"Error: Active phase '{current_phase_id}' is not defined in effortless.json."
 
     required_docs = phase_config.get("required_documents", [])
-    
+
+    # Registre des questions : sous-registre de la Story active si présente.
+    questions_dir = resolve_registry_dir(root, "questions")
+
     is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
         active_phase_id=current_phase_id,
         required_documents=required_docs,
-        questions_file_path=paths["questions"]
+        questions_file_path=questions_dir
     )
 
     # Récupérer les questions en suspens
     open_questions_list = []
-    if os.path.exists(paths["questions"]):
-        questions = load_entities(paths["questions"])
+    if os.path.exists(questions_dir):
+        questions = load_entities(questions_dir)
         open_questions_list = [q for q in questions if q.get("status") != "Resolved" and q.get("phase") == current_phase_id]
 
     status_report = f"📋 Project Status: {state_data.get('project_name')}\n"
@@ -455,7 +467,7 @@ def effortless_phase_next() -> str:
         project_root=root,
         active_phase_id=current_phase_id,
         required_documents=required_docs,
-        questions_file_path=paths["questions"]
+        questions_file_path=resolve_registry_dir(root, "questions")
     )
 
     if not is_valid:
@@ -535,7 +547,9 @@ def effortless_decision_add(
     # Phase faisant autorité : opale_phase de la Story active.
     current_phase_id = resolve_active_phase(root)
 
-    decisions = load_entities(paths["decisions"])
+    # Registre des décisions : sous-registre de la Story active si présente.
+    decisions_dir = resolve_registry_dir(root, "decisions")
+    decisions = load_entities(decisions_dir)
 
     # ID = max existant + 1 (robuste aux suppressions)
     dec_id = next_sequential_id([d.get("id", "") for d in decisions], "DEC-")
@@ -556,7 +570,7 @@ def effortless_decision_add(
     decisions.append(new_dec_dump)
 
     # Sauvegarde JSON individuelle
-    save_entity(paths["decisions"], dec_id, new_dec_dump)
+    save_entity(decisions_dir, dec_id, new_dec_dump)
 
     # Synchronisation Markdown
     # Trouver le chemin du fichier de décisions dans effortless.json
@@ -620,7 +634,9 @@ def effortless_question_ask(
     current_phase_id = resolve_active_phase(root)
     project_name = state_data.get("project_name")
 
-    questions = load_entities(paths["questions"])
+    # Registre des questions : sous-registre de la Story active si présente.
+    questions_dir = resolve_registry_dir(root, "questions")
+    questions = load_entities(questions_dir)
 
     # ID = max existant + 1 (robuste aux suppressions)
     q_id = next_sequential_id([q.get("id", "") for q in questions], "Q-")
@@ -639,7 +655,7 @@ def effortless_question_ask(
     questions.append(new_q_dump)
 
     # Sauvegarde JSON individuelle
-    save_entity(paths["questions"], q_id, new_q_dump)
+    save_entity(questions_dir, q_id, new_q_dump)
 
     # Synchronisation Markdown
     with open(paths["config"], "r", encoding="utf-8") as f:
@@ -693,7 +709,9 @@ def effortless_question_resolve(
         state_data = json.load(f)
     project_name = state_data.get("project_name")
 
-    questions = load_entities(paths["questions"])
+    # Registre des questions : sous-registre de la Story active si présente.
+    questions_dir = resolve_registry_dir(root, "questions")
+    questions = load_entities(questions_dir)
 
     target_q = next((q for q in questions if q["id"] == question_id), None)
     if not target_q:
@@ -704,7 +722,7 @@ def effortless_question_resolve(
     target_q["date_resolved"] = _today_iso()
 
     # Sauvegarde JSON individuelle
-    save_entity(paths["questions"], question_id, target_q)
+    save_entity(questions_dir, question_id, target_q)
 
     # Récupérer la phase de la question pour mettre à jour son fichier Markdown
     q_phase_id = target_q["phase"]
@@ -833,7 +851,9 @@ def effortless_task_update(
     if status not in ["Todo", "Doing", "Done"]:
         return "Error: Status must be 'Todo', 'Doing', or 'Done'."
 
-    tasks = load_entities(paths["tasks"])
+    # Registre des tâches : sous-registre de la Story active si présente.
+    tasks_dir = resolve_registry_dir(root, "tasks")
+    tasks = load_entities(tasks_dir)
 
     target_task = next((t for t in tasks if t["id"] == task_id), None)
     if not target_task:
@@ -850,7 +870,7 @@ def effortless_task_update(
     target_task["status"] = status
 
     # Sauvegarde JSON individuelle
-    save_entity(paths["tasks"], task_id, target_task)
+    save_entity(tasks_dir, task_id, target_task)
 
     return f"Task '{task_id}' updated to status '{status}'."
 
@@ -920,8 +940,8 @@ def effortless_secondbrain_sync() -> str:
     archive_body += f"Project: {state_data.get('project_name')}\n"
     archive_body += f"Active phase: {current_phase_id}\n\n"
     
-    # Décisions
-    decisions = load_entities(paths["decisions"])
+    # Décisions : sous-registre de la Story active si présente.
+    decisions = load_entities(resolve_registry_dir(root, "decisions"))
     archive_body += "### 🏛️ Decisions made:\n"
     if not decisions:
         archive_body += "*No decisions*\n"
@@ -1023,11 +1043,16 @@ def build_project_overview(root: str) -> Dict[str, Any]:
     phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
     required_docs = phase_cfg.get("required_documents", []) if phase_cfg else []
 
+    # Registres : sous-registres de la Story active si présente, sinon registres globaux plats.
+    tasks_dir = resolve_registry_dir(root, "tasks")
+    decisions_dir = resolve_registry_dir(root, "decisions")
+    questions_dir = resolve_registry_dir(root, "questions")
+
     is_valid, checklist, blocking = validate_phase_documents(
         project_root=root,
         active_phase_id=current_phase_id,
         required_documents=required_docs,
-        questions_file_path=paths["questions"],
+        questions_file_path=questions_dir,
     )
 
     completed_ids = {cp.get("id") for cp in state_data.get("completed_phases", [])}
@@ -1048,9 +1073,9 @@ def build_project_overview(root: str) -> Dict[str, Any]:
         "blocking_reasons": blocking,
         "checklist": checklist,
         "phases": phases,
-        "tasks": load_entities(paths["tasks"]),
-        "decisions": load_entities(paths["decisions"]),
-        "questions": load_entities(paths["questions"]),
+        "tasks": load_entities(tasks_dir),
+        "decisions": load_entities(decisions_dir),
+        "questions": load_entities(questions_dir),
         "completed_phases": state_data.get("completed_phases", []),
     }
 
