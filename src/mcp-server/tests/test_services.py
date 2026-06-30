@@ -1573,3 +1573,52 @@ def test_rest_jiraclient_removed():
     assert hasattr(jira_client, "FakeJiraClient")
     assert not hasattr(jira_client, "JiraClient")
     assert not hasattr(jira, "JiraTracker")
+
+
+def test_tracker_tools_queue_flow(monkeypatch):
+    # Flux médié complet : couple -> scaffold (enqueue) -> pending -> ack -> idempotent.
+    from effortless_mcp import server
+    import json as _json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        couple = server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        assert "couplé" in couple and "Rovo" in couple
+
+        out = server.effortless_tracker_scaffold("PROJET")
+        assert "6 op(s) en attente" in out
+
+        pend = server.effortless_tracker_pending()
+        assert "pending" in pend and "local:1" in pend
+        data = _json.loads(pend.split("\n\n", 1)[1])["pending"]
+        assert len(data) == 6
+        # L'agent (simulé) crée les vraies clés et ack.
+        refs = {op["local_id"]: {"tracker_id": f"EFL-{op['seq']}", "tracker_url": f"u/EFL-{op['seq']}"}
+                for op in data}
+        ack = server.effortless_tracker_ack("PROJET", _json.dumps(refs))
+        assert "6 ref" in ack
+
+        # Outbox vidé après ack.
+        assert "Aucune opération" in server.effortless_tracker_pending()
+        # Re-scaffold : idempotent (ScaffoldState).
+        assert "déjà scaffoldée" in server.effortless_tracker_scaffold("PROJET")
+
+
+def test_tracker_scaffold_uncoupled_noop(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        out = server.effortless_tracker_scaffold("PROJET")
+        assert "no-op" in out
+        # Aucune op enqueue côté outbox.
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_tracker_ack_rejects_bad_json(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_ack("PROJET", "{not json")
