@@ -912,6 +912,11 @@ def test_effortless_migrate_state_tool(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
 
+        # init scaffolde le cadrage story-scopé (identique à la sortie du migrateur).
+        assert os.path.exists(os.path.join(
+            tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01", "00-FNC-GLO-glossaire.md"
+        ))
+
         # effortless_init est désormais fractal-native (L-31). Pour exercer l'outil de
         # migration legacy -> fractal, on ramène le projet à un état plat pré-fractal :
         # suppression de l'arbre epics/ scaffoldé et retrait des pointeurs d'état.
@@ -1052,3 +1057,119 @@ def test_task_add_uses_active_story_phase(monkeypatch):
         assert not os.path.exists(
             os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json")
         )
+
+
+def test_decision_add_syncs_under_active_story_docs_dir(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_decision_add(
+            title="Choix du stockage",
+            context="On hésite entre A et B.",
+            decision="On prend A.",
+            consequences=["Moins de latence"],
+        )
+
+        # Le Markdown des décisions atterrit dans le dossier cadrage scopé Story.
+        story_docs_dir = os.path.join(
+            tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01"
+        )
+        md_path = os.path.join(story_docs_dir, "03-MET-DEC-registre-decisions.md")
+        assert os.path.exists(md_path)
+        # Pas de double-préfixe root (pas de cadrage/.../cadrage/...).
+        assert "cadrage/EPIC-PROJET/STO-PROJET-01/" in msg.replace(os.sep, "/")
+        assert msg.count("cadrage") == 1
+
+
+def test_decision_add_entity_stored_in_story_dir(monkeypatch):
+    # Le JSON de décision atterrit dans le sous-registre de la Story active,
+    # PAS dans le registre global plat .effortless/decisions/.
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        server.effortless_decision_add(
+            title="Choix du stockage",
+            context="On hésite entre A et B.",
+            decision="On prend A.",
+            consequences=["Moins de latence"],
+        )
+
+        story_dec_dir = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories",
+            "STO-PROJET-01", "decisions",
+        )
+        dec_files = [n for n in os.listdir(story_dec_dir)
+                     if n.startswith("DEC-") and n.endswith(".json")]
+        assert len(dec_files) == 1
+
+        # Aucun DEC-*.json dans le registre global plat.
+        flat_dec_dir = os.path.join(tmpdir, ".effortless", "decisions")
+        flat_dec = [n for n in os.listdir(flat_dec_dir)
+                    if n.startswith("DEC-") and n.endswith(".json")]
+        assert flat_dec == []
+
+
+def test_task_update_finds_story_task(monkeypatch):
+    # task_update doit trouver la tâche dans le sous-registre de la Story active
+    # et persister le nouveau statut (et non échouer en 'task not found').
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_task_add("Implement X")
+        tsk_id = msg.split("Task ")[1].split(" ")[0]
+
+        result = server.effortless_task_update(tsk_id, "Doing")
+        assert "not found" not in result
+        assert tsk_id in result and "Doing" in result
+
+        nested_path = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories",
+            "STO-PROJET-01", "tasks", f"{tsk_id}.json",
+        )
+        with open(nested_path, encoding="utf-8") as f:
+            assert json.load(f)["status"] == "Doing"
+
+
+def test_overview_lists_story_entities(monkeypatch):
+    # build_project_overview agrège les entités de la Story active (sous-registres),
+    # donc la liste tasks n'est pas vide après un ajout.
+    from effortless_mcp import server
+    from effortless_mcp.server import build_project_overview
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        server.effortless_task_add("Une tâche")
+
+        overview = build_project_overview(tmpdir)
+        assert overview["initialized"] is True
+        assert len(overview["tasks"]) >= 1
+
+
+def test_question_ask_syncs_under_active_story_docs_dir(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_question_ask(
+            question="Quel format pour l'export ?",
+            context="L'export doit être interopérable.",
+            impact="Structuring",
+        )
+
+        # Le Markdown du BQO atterrit dans le dossier cadrage scopé Story.
+        story_docs_dir = os.path.join(
+            tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01"
+        )
+        md_path = os.path.join(story_docs_dir, "02-BQO-questions.md")
+        assert os.path.exists(md_path)
+        # Pas de double-préfixe root (pas de cadrage/.../cadrage/...).
+        assert "cadrage/EPIC-PROJET/STO-PROJET-01/" in msg.replace(os.sep, "/")
+        assert msg.count("cadrage") == 1
