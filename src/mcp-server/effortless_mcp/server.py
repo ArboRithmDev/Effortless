@@ -228,6 +228,29 @@ def resolve_registry_dir(root: str, kind: str) -> str:
     return get_paths(root)[kind]
 
 
+def story_scoped_required_docs(root: str, phase_cfg: Optional[Dict[str, Any]]) -> List[str]:
+    """Required_documents de la phase rescopés sur la Story active (DEC-23).
+
+    Le workflow (effortless.json) déclare des chemins figés sur la première Story
+    (scaffoldée par effortless_init). Dès qu'une AUTRE Story est active, la barrière
+    doit valider les documents de CETTE Story — pas ceux de la première. On conserve
+    le nom de fichier (convention de phase) et on rebascule le dossier sur
+    cadrage/<EPIC>/<STORY>/ de la Story active. Sans Story active, on renvoie les
+    chemins du workflow tels quels (compat mono-Story / legacy plat).
+
+    Finding dogfood : révélé à l'ouverture de la 2e Story — la validation lisait des
+    chemins absolus pinés sur STO-PROJET-01 alors que les écritures étaient déjà
+    story-scopées (decision_add / question_ask)."""
+    docs = phase_cfg.get("required_documents", []) if phase_cfg else []
+    story = get_active_story(root)
+    if story is None:
+        return docs
+    docs_dir_rel = os.path.relpath(
+        resolve_phase_docs_dir_nested(root, story["epic_id"], story["id"]), root
+    )
+    return [os.path.join(docs_dir_rel, os.path.basename(d)) for d in docs]
+
+
 # --- 1. Outils d'Initialisation & Statut ---
 
 @mcp.tool()
@@ -391,7 +414,7 @@ def effortless_status() -> str:
     if not phase_config:
         return f"Error: Active phase '{current_phase_id}' is not defined in effortless.json."
 
-    required_docs = phase_config.get("required_documents", [])
+    required_docs = story_scoped_required_docs(root, phase_config)
 
     # Registre des questions : sous-registre de la Story active si présente.
     questions_dir = resolve_registry_dir(root, "questions")
@@ -462,7 +485,7 @@ def effortless_phase_next() -> str:
 
     # Valider les barrières de la phase en cours
     phase_config = phases_list[current_idx]
-    required_docs = phase_config.get("required_documents", [])
+    required_docs = story_scoped_required_docs(root, phase_config)
     is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
         active_phase_id=current_phase_id,
@@ -1041,7 +1064,7 @@ def build_project_overview(root: str) -> Dict[str, Any]:
     current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
     phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
-    required_docs = phase_cfg.get("required_documents", []) if phase_cfg else []
+    required_docs = story_scoped_required_docs(root, phase_cfg)
 
     # Registres : sous-registres de la Story active si présente, sinon registres globaux plats.
     tasks_dir = resolve_registry_dir(root, "tasks")
