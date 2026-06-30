@@ -24,6 +24,7 @@ from effortless_mcp.services.deploy import deploy_to_mcp_clients
 from effortless_mcp.services.repo_analyzer import analyze_target_repo
 from effortless_mcp.services.migration_planner import init_migration_project, apply_migration_project
 from effortless_mcp.services.session_loop import init_autonomous_loop, step_autonomous_loop
+from effortless_mcp.services.state_migrator import migrate_state_to_fractal
 
 
 
@@ -1112,6 +1113,21 @@ def effortless_migrate_apply(target_path: str, dry_run: bool = False) -> str:
         return apply_migration_project(target_path, dry_run=dry_run)
     except Exception as e:
         return f"Error applying migration: {str(e)}"
+
+@mcp.tool()
+def effortless_migrate_state(confirm: bool = False) -> str:
+    """
+    Migre un projet Effortless plat vers le modèle fractal (Epic / Story).
+
+    Sûr par défaut : sans `confirm=True`, retourne un APERÇU non destructif (rien n'est écrit).
+    `confirm=True` applique réellement la migration : scaffolde EPIC-PROJET / STO-PROJET-01,
+    déplace les registres, relocalise le cadrage, réécrit la config et positionne les pointeurs d'état.
+    """
+    try:
+        root = get_project_root()
+        return migrate_state_to_fractal(root, dry_run=not confirm)
+    except Exception as e:
+        return f"Error migrating state to fractal model: {str(e)}"
 
 @mcp.tool()
 def effortless_loop_init(goal: str) -> str:

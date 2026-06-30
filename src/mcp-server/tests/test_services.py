@@ -902,3 +902,34 @@ def test_migrate_state_relocates_cadrage_and_rewrites_config():
         phase = config["workflow"]["phases"][0]
         assert phase["id"] == "L-plan"
         assert phase["required_documents"] == ["cadrage/EPIC-PROJET/STO-PROJET-01/07-MET-PLN-plan-action.md"]
+
+
+def test_effortless_migrate_state_tool(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "epic.json")
+        story_file = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "story.json"
+        )
+
+        # Aperçu (confirm=False) : non destructif
+        preview = server.effortless_migrate_state()
+        assert "PREVIEW" in preview
+        assert not os.path.exists(epic_file)
+
+        # Application (confirm=True)
+        applied = server.effortless_migrate_state(confirm=True)
+        assert os.path.exists(epic_file)
+        assert os.path.exists(story_file)
+
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["active_epic_id"] == "EPIC-PROJET"
+        assert state["active_story_id"] == "STO-PROJET-01"
+
+        # Idempotence
+        again = server.effortless_migrate_state(confirm=True)
+        assert "Already migrated" in again
