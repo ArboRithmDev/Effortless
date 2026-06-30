@@ -1449,6 +1449,24 @@ def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira
 
 
 @mcp.tool()
+def effortless_tracker_pending() -> str:
+    """
+    Renvoie les opérations Jira en attente (le plan à exécuter par l'agent via Rovo).
+
+    Projection médiée (STO-TRACKER-03) : le serveur n'exécute rien ; il liste les ops
+    enqueue dans l'outbox. L'agent les joue via Rovo (createJiraIssue, parent+labels)
+    en ordre `seq` croissant (parent avant enfant), puis appelle effortless_tracker_ack.
+    """
+    root = get_project_root()
+    from effortless_mcp.ports import SyncJournal, ROVO_DISCLAIMER
+    pend = SyncJournal(root).pending()
+    if not pend:
+        return f"{ROVO_DISCLAIMER}\n\nAucune opération en attente."
+    ops = [{"seq": e["seq"], "op": e["op"], **(e.get("args") or {})} for e in pend]
+    return f"{ROVO_DISCLAIMER}\n\n{json.dumps({'pending': ops}, ensure_ascii=False, indent=2)}"
+
+
+@mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """
     Initialise une session de développement itératif autonome avec un objectif global spécifié.
