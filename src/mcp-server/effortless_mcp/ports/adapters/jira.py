@@ -119,3 +119,60 @@ def build_jira_tracker(cfg: dict) -> JiraTracker:
 
 # Effet de bord d'import : rend le type « jira » résoluble par resolve_tracker.
 register_adapter("jira", build_jira_tracker)
+
+
+# --- Projection médiée agent (STO-TRACKER-03) -------------------------------
+
+# Niveau canonique -> nom de type Jira (passé à createJiraIssue côté agent).
+_LEVELMAP = {"epic": "Epic", "story": "Story", "task": "Sous-tâche"}
+
+
+class QueueTracker:
+    """Adapter Jira médié (DEC-01/03 STO-TRACKER-03). `create` n'appelle pas le
+    réseau : il **enqueue** une op dans l'outbox (`SyncJournal`) et retourne une
+    ref placeholder `local:N`. L'agent (qui a Rovo) flushe puis ack les vraies refs.
+    """
+
+    def __init__(self, journal, levelmap: Optional[dict] = None):
+        self._journal = journal
+        self._levelmap = levelmap or dict(_LEVELMAP)
+        self._seq = 0
+
+    def discover_taxonomy(self, project: ProjectRef) -> Taxonomy:
+        # Médié agent : la taxonomie est fournie via ack si nécessaire. Vide ici.
+        return Taxonomy()
+
+    def create(self, payload: ObjectPayload) -> TrackerRef:
+        self._seq += 1
+        local_id = f"local:{self._seq}"
+        parent_local = payload.parent_ref.tracker_id if payload.parent_ref else None
+        self._journal.enqueue("create", {
+            "local_id": local_id,
+            "level": payload.level,
+            "issue_type_name": self._levelmap.get(payload.level, payload.level),
+            "title": payload.title,
+            "parent_local_id": parent_local,
+            "labels": list(payload.labels or []),
+        })
+        return TrackerRef(tracker_id=local_id, tracker_url="")
+
+    def transition(self, ref: TrackerRef, status: LocalStatus) -> None:
+        raise NotImplementedError("QueueTracker.transition — hors MVP (story suivante).")
+
+    def log_work(self, ref: TrackerRef, minutes: int, comment: str) -> None:
+        raise NotImplementedError("QueueTracker.log_work — hors MVP (story suivante).")
+
+    def import_tree(self, project: ProjectRef) -> List[ImportedObject]:
+        return []
+
+
+def build_queue_tracker(cfg: dict) -> QueueTracker:
+    """Fabrique du type « jira » en mode médié. Le SyncJournal écrit sous la racine
+    projet injectée dans la cfg (`__root__`)."""
+    from effortless_mcp.ports.sync_journal import SyncJournal
+    return QueueTracker(SyncJournal(cfg["__root__"]))
+
+
+# Mode médié = défaut pour « jira » (override de l'enregistrement REST ci-dessus ;
+# l'ancien chemin REST est retiré en TSK-04).
+register_adapter("jira", build_queue_tracker)
