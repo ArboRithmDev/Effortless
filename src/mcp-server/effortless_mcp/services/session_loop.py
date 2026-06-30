@@ -155,6 +155,10 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 timeout=TEST_TIMEOUT_SECONDS,
                 stdin=subprocess.DEVNULL,  # ne pas hériter du pipe JSON-RPC (deadlock MCP/Windows)
                 encoding="utf-8",
+                errors="replace",  # F1 (DEC-19) : sous shell=True (cmd.exe) la sortie peut contenir
+                                   # des octets OEM/cp850 invalides en utf-8 ; un décodage strict lève
+                                   # UnicodeDecodeError dans le reader thread → stdout/stderr None →
+                                   # plante la concat plus bas et masque le vrai code retour.
             )
             rc = res.returncode
             if rc == 5:
@@ -170,7 +174,8 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 )
             elif rc != 0:
                 test_failed = True
-                test_logs = res.stdout + "\n" + res.stderr
+                # Garde None (F1/DEC-19) : malgré errors='replace', rester défensif.
+                test_logs = (res.stdout or "") + "\n" + (res.stderr or "")
         except subprocess.TimeoutExpired:
             test_failed = True
             test_logs = (
@@ -217,14 +222,16 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                     f"👉 Instruction: Fix the errors reported in the tests, then re-run `effortless_loop_step`."
                 )
         else:
-            # Succès de recette -> Livraison & Passage à la tâche suivante
-            if current_task_id:
-                task = next((t for t in tasks if t["id"] == current_task_id), None)
-                if task:
-                    task["status"] = "Done"
-                    save_entity(tasks_dir, task["id"], task)
-
-            # Faire un commit Git automatique.
+            # Succès de recette -> Livraison & Passage à la tâche suivante.
+            #
+            # F3 (dogfood DEC-20) : committer PENDANT que la tâche est encore 'Doing'.
+            # Le hook pre-commit anti-drift bloque tout commit s'il existe des fichiers
+            # de code modifiés mais AUCUNE tâche 'Doing'. Marquer la tâche 'Done' AVANT
+            # de committer supprimait la seule tâche active → le commit était rejeté
+            # (erreur avalée en « already committed? »), le travail livré jamais persisté,
+            # et le fichier non committé déclenchait une fausse dérive à la tâche suivante.
+            # On commit d'abord (tâche encore active), on clôt ensuite.
+            #
             # stdin=DEVNULL + capture_output : sinon git hérite du pipe JSON-RPC du
             # serveur MCP (deadlock Windows) et écrit sur le stdout du protocole.
             try:
@@ -240,6 +247,14 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
                 git_msg = "Changes committed to Git."
             except Exception as e:
                 git_msg = f"Failed to commit: {str(e)} (already committed?)"
+
+            # Tâche livrée et committée : on peut la clôturer. La bascule 'Done' (fichier
+            # .effortless/, hors scope drift src/) sera incluse dans le prochain commit.
+            if current_task_id:
+                task = next((t for t in tasks if t["id"] == current_task_id), None)
+                if task:
+                    task["status"] = "Done"
+                    save_entity(tasks_dir, task["id"], task)
 
             # Repasser à l'étape Plan
             loop_state["step"] = "Plan"
