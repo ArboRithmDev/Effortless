@@ -7,5 +7,6 @@ class Task(BaseModel):
     description: Optional[str] = None
     status: str = "Todo"
     phase: str
+    story_id: Optional[str] = None
     depends_on: List[str] = Field(default_factory=list)
     complexity: Optional[str] = None
