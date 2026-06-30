@@ -1160,6 +1160,40 @@ def test_decision_add_syncs_under_active_story_docs_dir(monkeypatch):
         assert msg.count("cadrage") == 1
 
 
+def test_question_resolve_syncs_under_active_story_docs_dir(monkeypatch):
+    # Régression : resolve écrivait le BQO via le chemin littéral d'effortless.json
+    # (piné sur la 1re Story) → il re-synchronisait le BQO de la MAUVAISE Story dès
+    # qu'une autre Story était active (corruption croisée observée en dogfood).
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # Repointer l'état sur une 2e Story (dossier cadrage != celui pinné en config).
+        eff = os.path.join(tmpdir, ".effortless")
+        story_dir = os.path.join(eff, "epics", "EPIC-TRACKER", "stories", "STO-TRACKER-01")
+        os.makedirs(os.path.join(story_dir, "questions"), exist_ok=True)
+        with open(os.path.join(eff, "state.json"), encoding="utf-8") as f:
+            st = json.load(f)
+        st["active_epic_id"] = "EPIC-TRACKER"
+        st["active_story_id"] = "STO-TRACKER-01"
+        with open(os.path.join(eff, "state.json"), "w", encoding="utf-8") as f:
+            json.dump(st, f)
+        with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "STO-TRACKER-01", "epic_id": "EPIC-TRACKER",
+                       "title": "x", "opale_phase": "O-analyse"}, f)
+
+        server.effortless_question_ask(question="Q ?", context="ctx", impact="Structuring")
+        server.effortless_question_resolve(question_id="Q-01", answer="Oui.")
+
+        # Le BQO de la Story ACTIVE est re-synchronisé et clôturé.
+        tracker_bqo = os.path.join(tmpdir, "cadrage", "EPIC-TRACKER",
+                                   "STO-TRACKER-01", "02-BQO-questions.md")
+        assert os.path.exists(tracker_bqo)
+        meta, _ = parse_markdown_frontmatter(tracker_bqo)
+        assert meta["statut"] in ("Résolu", "Resolved")
+
+
 def test_decision_add_entity_stored_in_story_dir(monkeypatch):
     # Le JSON de décision atterrit dans le sous-registre de la Story active,
     # PAS dans le registre global plat .effortless/decisions/.

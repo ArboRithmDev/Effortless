@@ -755,19 +755,30 @@ def effortless_question_resolve(
     
     phases_list = config_data.get("workflow", {}).get("phases", [])
     q_phase_cfg = next((p for p in phases_list if p["id"] == q_phase_id), None)
-    docs_dir = resolve_phase_docs_dir(q_phase_cfg, config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001"))
+    settings_documents_dir = config_data.get("settings", {}).get("documents_dir", "cadrage/Phase-001")
 
-    bqo_doc_rel = None
+    # Le repertoire fait autorite via la Story active (DEC-23) -> chemin ABSOLU ;
+    # sinon repli phase-scope (chemin RELATIF a prefixer par root). Aligne resolve
+    # sur decision_add / question_ask : sans ca, la resolution ecrivait le BQO via
+    # le chemin littéral d'effortless.json (piné sur la 1re Story) et corrompait le
+    # BQO d'une AUTRE Story.
+    story = get_active_story(root)
+    if story is not None:
+        docs_abs = resolve_phase_docs_dir_nested(root, story["epic_id"], story["id"])
+    else:
+        docs_abs = os.path.join(root, resolve_phase_docs_dir(q_phase_cfg, settings_documents_dir))
+
+    bqo_filename = None
     if q_phase_cfg:
         for doc in q_phase_cfg.get("required_documents", []):
             if "bqo" in doc.lower() or "question" in doc.lower():
-                bqo_doc_rel = doc
+                bqo_filename = os.path.basename(doc)
                 break
-                
-    if not bqo_doc_rel:
-        bqo_doc_rel = f"{docs_dir}/02-BQO-questions.md"
 
-    markdown_path = os.path.join(root, bqo_doc_rel)
+    if not bqo_filename:
+        bqo_filename = "02-BQO-questions.md"
+
+    markdown_path = os.path.join(docs_abs, bqo_filename)
     phase_questions = [q for q in questions if q.get("phase") == q_phase_id]
     sync_questions_to_markdown(markdown_path, q_phase_id, project_name, phase_questions)
 
