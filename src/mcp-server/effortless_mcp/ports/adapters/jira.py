@@ -65,7 +65,25 @@ class JiraTracker:
 
     # --- create (TSK-05) ---
     def create(self, payload: ObjectPayload) -> TrackerRef:
-        raise NotImplementedError("JiraTracker.create — implémenté en TSK-05.")
+        """Crée l'issue du niveau demandé. Résout le type via la taxonomie (la
+        découvre paresseusement si absente), câble le parent, pose les labels.
+        `assignee=None` (DEC-07 : scaffold fidèle, non affecté)."""
+        if self._taxonomy is None:
+            self.discover_taxonomy(ProjectRef(self._project_key, ""))
+        type_id = self._taxonomy.issue_types.get(payload.level)
+        if not type_id:
+            raise ValueError(f"Niveau '{payload.level}' absent de la taxonomie découverte.")
+        parent_key = payload.parent_ref.tracker_id if payload.parent_ref else None
+        r = self._client.create_issue(
+            project_key=self._project_key,
+            issue_type_id=type_id,
+            summary=payload.title,
+            parent_key=parent_key,
+            assignee=None,
+            description=payload.description,
+            labels=payload.labels,
+        )
+        return TrackerRef(tracker_id=r["key"], tracker_url=r["url"])
 
     # --- Hors MVP (stories suivantes M2) ---
     def transition(self, ref: TrackerRef, status: LocalStatus) -> None:
