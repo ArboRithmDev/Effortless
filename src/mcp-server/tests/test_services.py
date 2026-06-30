@@ -856,3 +856,49 @@ def test_migrate_state_moves_registries():
         # Idempotence : un second passage ne plante pas.
         again = migrate_state_to_fractal(tmpdir, dry_run=False)
         assert "Already migrated" in again
+
+
+def test_migrate_state_relocates_cadrage_and_rewrites_config():
+    from effortless_mcp.services.state_migrator import migrate_state_to_fractal
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        eff_dir = os.path.join(tmpdir, ".effortless")
+        os.makedirs(eff_dir)
+
+        with open(os.path.join(tmpdir, "effortless.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "settings": {"storage_dir": ".effortless", "documents_dir": "cadrage/Phase-001"},
+                "workflow": {"phases": [{
+                    "id": "L-plan",
+                    "name": "Lancer",
+                    "required_documents": ["cadrage/Phase-001/07-MET-PLN-plan-action.md"],
+                }]},
+                "project": {"name": "effortless"},
+            }, f, ensure_ascii=False)
+
+        with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "project_name": "effortless",
+                "current_phase": "L-plan",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_phases": [],
+            }, f)
+
+        doc_dir = os.path.join(tmpdir, "cadrage", "Phase-001")
+        os.makedirs(doc_dir)
+        with open(os.path.join(doc_dir, "07-MET-PLN-plan-action.md"), "w", encoding="utf-8") as f:
+            f.write("# Plan d'action\n\nContenu de cadrage.\n")
+
+        migrate_state_to_fractal(tmpdir, dry_run=False)
+
+        new_doc = os.path.join(tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01", "07-MET-PLN-plan-action.md")
+        old_doc = os.path.join(tmpdir, "cadrage", "Phase-001", "07-MET-PLN-plan-action.md")
+        assert os.path.exists(new_doc)
+        assert not os.path.exists(old_doc)
+
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            config = json.load(f)
+        assert config["settings"]["documents_dir"] == "cadrage/EPIC-PROJET/STO-PROJET-01"
+        phase = config["workflow"]["phases"][0]
+        assert phase["id"] == "L-plan"
+        assert phase["required_documents"] == ["cadrage/EPIC-PROJET/STO-PROJET-01/07-MET-PLN-plan-action.md"]

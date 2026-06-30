@@ -26,6 +26,77 @@ def _move_registry(src_dir: str, dst_dir: str) -> int:
     return moved
 
 
+def _relocate_cadrage(root: str, old_dir: str, new_dir: str) -> int:
+    """Déplace tout le contenu de <root>/<old_dir> vers <root>/<new_dir>.
+
+    Préserve la structure : déplace chaque entrée (fichiers ET sous-dossiers) à la
+    racine de old_dir via shutil.move. Source absente/vide -> 0 (silencieux).
+    Retourne le nombre d'entrées déplacées. stdlib pure (os, shutil).
+    """
+    src_dir = os.path.join(root, old_dir)
+    dst_dir = os.path.join(root, new_dir)
+    if not os.path.isdir(src_dir):
+        return 0
+    entries = os.listdir(src_dir)
+    if not entries:
+        return 0
+    os.makedirs(dst_dir, exist_ok=True)
+    moved = 0
+    for name in entries:
+        src = os.path.join(src_dir, name)
+        dst = os.path.join(dst_dir, name)
+        if os.path.exists(dst):
+            if os.path.isdir(dst):
+                shutil.rmtree(dst)
+            else:
+                os.remove(dst)
+        shutil.move(src, dst)
+        moved += 1
+    return moved
+
+
+def _rewrite_cadrage_config(root: str, old_dir: str, new_dir: str) -> int:
+    """Réécrit <root>/effortless.json pour pointer documents_dir vers new_dir et
+    repréfixer les required_documents de chaque phase (old_dir -> new_dir).
+
+    Déplace aussi physiquement les docs (old_dir -> new_dir). No-op si old_dir == new_dir
+    ou si effortless.json absent. Retourne le nombre d'entrées de cadrage déplacées.
+    stdlib pure (os, json, shutil).
+    """
+    config_path = os.path.join(root, "effortless.json")
+    if not os.path.exists(config_path):
+        return 0
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    settings = config.get("settings", {})
+    effective_old = settings.get("documents_dir") or old_dir
+    if effective_old == new_dir:
+        return 0  # déjà story-scoped
+
+    # Déplacer les docs physiquement.
+    moved = _relocate_cadrage(root, effective_old, new_dir)
+
+    # Réécrire la config en mémoire.
+    settings["documents_dir"] = new_dir
+    config["settings"] = settings
+    prefix = effective_old + "/"
+    for phase in config.get("workflow", {}).get("phases", []):
+        reqs = phase.get("required_documents")
+        if not isinstance(reqs, list):
+            continue
+        phase["required_documents"] = [
+            new_dir + p[len(effective_old):] if p.startswith(prefix) else p
+            for p in reqs
+        ]
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+    return moved
+
+
 def migrate_state_to_fractal(root: str, dry_run: bool = True) -> str:
     """Auto-migration d'un projet Effortless du modèle global plat (state.current_phase)
     vers le modèle fractal (DEC-22).
@@ -112,8 +183,14 @@ def migrate_state_to_fractal(root: str, dry_run: bool = True) -> str:
         os.path.join(eff_dir, "questions"), os.path.join(story_dir, "questions")
     )
 
+    # 8. Relocaliser les docs de cadrage globaux dans un dir story-scopé + réécrire la config.
+    new_dir = "cadrage/EPIC-PROJET/STO-PROJET-01"
+    old_dir = "cadrage/Phase-001"
+    n_cadrage = _rewrite_cadrage_config(root, old_dir, new_dir)
+
     return (
         "Migrated to fractal model: created Epic EPIC-PROJET and Story STO-PROJET-01 "
         f"(opale_phase={current_phase!r}). State pointers set; current_phase kept as transitional fallback. "
-        f"Relocated registries into STO-PROJET-01: {n_tasks} task(s), {n_decisions} decision(s), {n_questions} question(s)."
+        f"Relocated registries into STO-PROJET-01: {n_tasks} task(s), {n_decisions} decision(s), {n_questions} question(s). "
+        f"Cadrage relocated to {new_dir} ({n_cadrage} entr(y/ies)); effortless.json rewritten."
     )
