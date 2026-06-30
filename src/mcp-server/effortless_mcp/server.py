@@ -1449,6 +1449,29 @@ def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira
 
 
 @mcp.tool()
+def effortless_tracker_ack(zone: str, refs_json: str) -> str:
+    """
+    Enregistre les refs Jira créées par l'agent et marque l'outbox joué (idempotent).
+
+    `refs_json` = JSON `{"local:1": {"tracker_id": "EFL-1", "tracker_url": "…"}, …}`,
+    la map id local → ref réelle produite par l'agent après exécution via Rovo.
+    Persiste l'identité (ScaffoldState pour la zone) et vide les ops en attente.
+    """
+    root = get_project_root()
+    from effortless_mcp.ports import SyncJournal
+    from effortless_mcp.services.scaffold_state import ScaffoldState
+    try:
+        refs = json.loads(refs_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        return f"Error: refs_json invalide ({e})."
+    if not isinstance(refs, dict):
+        return "Error: refs_json doit être un objet {local_id: {tracker_id, tracker_url}}."
+    ScaffoldState(root).set(zone, refs)
+    n = SyncJournal(root).replay(lambda e: None)  # marque tout joué, idempotent
+    return f"Ack zone '{zone}' : {len(refs)} ref(s) persistée(s), {n} op(s) outbox marquée(s) jouée(s)."
+
+
+@mcp.tool()
 def effortless_tracker_pending() -> str:
     """
     Renvoie les opérations Jira en attente (le plan à exécuter par l'agent via Rovo).
