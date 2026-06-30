@@ -175,6 +175,53 @@ def resolve_active_phase(root: str) -> Optional[str]:
         return None
 
 
+# --- Couche stockage fractal (DEC-22/23) : nested epics/<EPIC>/stories/<STORY>/ ---
+
+def get_epic_dir(root: str, epic_id: str) -> str:
+    """Dossier physique d'un Epic : .effortless/epics/<EPIC>/."""
+    return os.path.join(get_paths(root)["epics"], epic_id)
+
+
+def get_story_dir(root: str, epic_id: str, story_id: str) -> str:
+    """Dossier physique d'une Story : .effortless/epics/<EPIC>/stories/<STORY>/."""
+    return os.path.join(get_epic_dir(root, epic_id), "stories", story_id)
+
+
+def get_story_paths(root: str, epic_id: str, story_id: str) -> Dict[str, str]:
+    """Chemins clés d'une Story : sa fiche + ses sous-registres tasks/decisions/questions."""
+    sdir = get_story_dir(root, epic_id, story_id)
+    return {
+        "dir": sdir,
+        "story": os.path.join(sdir, "story.json"),
+        "tasks": os.path.join(sdir, "tasks"),
+        "decisions": os.path.join(sdir, "decisions"),
+        "questions": os.path.join(sdir, "questions"),
+    }
+
+
+def new_epic_id(zone: str) -> str:
+    """ID d'Epic lisible scopé zone : EPIC-<ZONE>."""
+    return f"EPIC-{zone.upper()}"
+
+
+def new_story_id(root: str, epic_id: str, zone: str) -> str:
+    """ID de Story sequentiel PAR Epic : STO-<ZONE>-NN (NN = max existant dans l'Epic + 1)."""
+    stories_dir = os.path.join(get_epic_dir(root, epic_id), "stories")
+    existing = os.listdir(stories_dir) if os.path.isdir(stories_dir) else []
+    return next_sequential_id(existing, f"STO-{zone.upper()}-")
+
+
+def new_entity_id(entity_dir: str, prefix: str) -> str:
+    """ID d'entite sequentiel DANS une Story (TSK-NN / DEC-NN / Q-NN). Repart a 1 par Story."""
+    existing = [e.get("id", "") for e in load_entities(entity_dir)]
+    return next_sequential_id(existing, prefix)
+
+
+def resolve_phase_docs_dir_nested(root: str, epic_id: str, story_id: str, documents_root: str = "cadrage") -> str:
+    """Docs de cadrage Story-scopes : cadrage/<EPIC>/<STORY>/ (DEC-23)."""
+    return os.path.join(root, documents_root, epic_id, story_id)
+
+
 # --- 1. Outils d'Initialisation & Statut ---
 
 @mcp.tool()
