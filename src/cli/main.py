@@ -148,10 +148,17 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         if "--drift-check-strict" in sys.argv:
             from effortless_mcp.services.drift import check_project_drift
-            from effortless_mcp.server import get_project_root, get_paths
+            from effortless_mcp.server import get_project_root, get_paths, get_active_story, get_story_paths
             root = get_project_root()
             paths = get_paths(root)
-            is_drifting, modified, active = check_project_drift(root, paths["tasks"])
+            # Modèle fractal : les tâches vivent dans la Story active (epics/<EPIC>/stories/<STORY>/tasks/).
+            # Repli sur le registre global plat pour les projets non encore migrés.
+            story = get_active_story(root)
+            if story is not None:
+                tasks_dir = get_story_paths(root, story["epic_id"], story["id"])["tasks"]
+            else:
+                tasks_dir = paths["tasks"]
+            is_drifting, modified, active = check_project_drift(root, tasks_dir)
             if is_drifting:
                 print("⚠️ [Effortless] DRIFT DETECTED: Code modified without active task.")
                 for f in modified:
