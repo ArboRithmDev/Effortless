@@ -8,6 +8,7 @@ stubs documentés, implémentés dans les stories suivantes du backlog M2.
 
 from __future__ import annotations
 
+import os
 from typing import List, Optional
 
 from effortless_mcp.ports.tracker import (
@@ -104,7 +105,11 @@ def build_jira_tracker(cfg: dict) -> JiraTracker:
     projet n'est pas couplé en Jira). Les tests réenregistrent leur propre fabrique
     avec un FakeJiraClient."""
     from effortless_mcp.ports.adapters.jira_client import JiraClient
-    client = JiraClient(cfg["base_url"], cfg["email"], cfg["api_token"])
+    # Credentials résolus depuis l'env si absents de la config (jamais en clair dans le repo).
+    base_url = cfg.get("base_url") or os.environ.get("JIRA_BASE_URL", "")
+    email = cfg.get("email") or os.environ.get("JIRA_EMAIL", "")
+    api_token = cfg.get("api_token") or os.environ.get("JIRA_API_TOKEN", "")
+    client = JiraClient(base_url, email, api_token)
     return JiraTracker(client, cfg["project_id"])
 
 

@@ -1373,6 +1373,82 @@ def effortless_migrate_state(confirm: bool = False) -> str:
         return f"Error migrating state to fractal model: {str(e)}"
 
 @mcp.tool()
+def effortless_tracker_couple(type: str, project_id: str, project_url: str, base_url: str = "") -> str:
+    """
+    Couple le projet Effortless à un projet du tracker (settings.tracker) et,
+    pour Jira, résout la taxonomie réelle (types + transitions).
+
+    Credentials Jira jamais stockés en clair : `JIRA_BASE_URL` (ou `base_url`),
+    `JIRA_EMAIL`, `JIRA_API_TOKEN` sont lus depuis l'environnement à la résolution.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+
+    from effortless_mcp.ports.integration import couple_project
+    couple_project(root, type, project_id, project_url)
+
+    # Persiste base_url dans settings.tracker (les secrets restent en env).
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    tracker_cfg = config_data.setdefault("settings", {}).setdefault("tracker", {})
+    if base_url:
+        tracker_cfg["base_url"] = base_url
+    with open(paths["config"], "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+    msg = f"Project coupled to {type} project '{project_id}' ({project_url})."
+    if type == "jira":
+        from effortless_mcp.ports import resolve_tracker, ProjectRef
+        try:
+            tracker = resolve_tracker(config_data.get("settings"))
+            tax = tracker.discover_taxonomy(ProjectRef(project_id, project_url))
+            msg += f" Taxonomy resolved: types={tax.issue_types}, transitions={tax.transitions}."
+        except Exception as e:
+            msg += f" (discover_taxonomy deferred — credentials/réseau ? {e})"
+    return msg
+
+
+@mcp.tool()
+def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira_project_scaffold") -> str:
+    """
+    Scaffolde l'arbre du template (défaut : [PROJET]) dans le projet tracker couplé.
+
+    Idempotent (DEC-05) : un re-run sur une zone déjà scaffoldée ne recrée rien.
+    Sans couplage (NullTracker), opération no-op (refs vides).
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+
+    from effortless_mcp.ports import resolve_tracker, ProjectRef
+    from effortless_mcp.services.scaffolder import scaffold_project_from_template
+    from effortless_mcp.services.scaffold_state import ScaffoldState
+    from effortless_mcp.templates import load_scaffold_template
+
+    settings = config_data.get("settings") or {}
+    tracker = resolve_tracker(settings)
+    tcfg = settings.get("tracker") or {}
+    project_ref = ProjectRef(tcfg.get("project_id", ""), tcfg.get("project_url", ""))
+    try:
+        template = load_scaffold_template(template_name)
+    except OSError as e:
+        return f"Error: template '{template_name}' introuvable ({e})."
+
+    try:
+        refs = scaffold_project_from_template(tracker, project_ref, template, zone, ScaffoldState(root))
+    except Exception as e:
+        return f"Error during scaffold: {e}"
+
+    nodes = ", ".join(f"{k} → {v['tracker_id'] or '(no-op)'}" for k, v in refs.items())
+    return f"Scaffold '{zone}' : {len(refs)} nœud(s). {nodes}"
+
+
+@mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """
     Initialise une session de développement itératif autonome avec un objectif global spécifié.
