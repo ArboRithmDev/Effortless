@@ -32,9 +32,12 @@ def get_secondbrain_vault_path() -> Optional[str]:
             continue
     return None
 
-def sync_phase_to_secondbrain(project_slug: str, phase_id: str) -> bool:
+def sync_phase_to_secondbrain(project_slug: str, phase_id: str, tracker: Optional[Dict[str, Any]] = None) -> bool:
     """
     Met à jour le statut de phase dans le fichier context.md du projet dans SecondBrain.
+
+    `tracker` (optionnel) : identité d'espace du tracker couplé (DEC-02), propagée
+    sous des clés namespacées `effortless_tracker_*` — non destructif.
     """
     vault_path = get_secondbrain_vault_path()
     if not vault_path:
@@ -54,6 +57,13 @@ def sync_phase_to_secondbrain(project_slug: str, phase_id: str) -> bool:
         # Le corps Markdown appartient à Memory Kit : on ne le réécrit pas.
         metadata["effortless_phase"] = phase_id
         metadata["effortless_last_sync"] = datetime.now().strftime("%Y-%m-%d")
+
+        # Propagation de l'identité tracker (DEC-02), clés namespacées.
+        if tracker:
+            if tracker.get("project_id"):
+                metadata["effortless_tracker_project_id"] = tracker["project_id"]
+            if tracker.get("project_url"):
+                metadata["effortless_tracker_project_url"] = tracker["project_url"]
 
         write_markdown_frontmatter(context_path, metadata, content)
         return True
