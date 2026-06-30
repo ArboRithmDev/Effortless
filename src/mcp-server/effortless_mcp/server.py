@@ -1391,7 +1391,9 @@ def effortless_tracker_couple(type: str, project_id: str, project_url: str) -> s
     return (
         f"{ROVO_DISCLAIMER}\n\n"
         f"Projet couplé au tracker {type} '{project_id}' ({project_url}). "
-        f"Aucun credential requis (projection médiée Rovo)."
+        f"Aucun credential requis (projection médiée Rovo).\n"
+        f"👉 Avant scaffold, fournis la taxonomie : agent → getJiraProjectIssueTypesMetadata, "
+        f"puis effortless_tracker_discover_ack(taxonomy_json={{level: issue_type_id}})."
     )
 
 
@@ -1444,6 +1446,34 @@ def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira
         f"Scaffold '{zone}' planifié : {len(refs)} op(s) en attente. "
         f"Exécute via effortless_tracker_pending (Rovo), puis effortless_tracker_ack."
     )
+
+
+@mcp.tool()
+def effortless_tracker_discover_ack(taxonomy_json: str) -> str:
+    """
+    Persiste la taxonomie médiée (level → issue_type_id) dans settings.tracker.taxonomy.
+
+    Fournie par l'agent après `getJiraProjectIssueTypesMetadata` (projection médiée,
+    STO-TRACKER-04). Permet à QueueTracker de stamper l'`issue_type_id` autoritaire
+    sur chaque op — indispensable pour les sous-tâches côté Rovo (DEC-07).
+    Ex. : `{"epic":"10000","story":"10007","task":"10095"}`.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    try:
+        tax = json.loads(taxonomy_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        return f"Error: taxonomy_json invalide ({e})."
+    if not isinstance(tax, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in tax.items()):
+        return "Error: taxonomy doit être un objet {level: issue_type_id} (chaînes)."
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    config_data.setdefault("settings", {}).setdefault("tracker", {})["taxonomy"] = tax
+    with open(paths["config"], "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    return f"Taxonomie médiée persistée : {tax}."
 
 
 @mcp.tool()
