@@ -102,6 +102,8 @@ def get_paths(root: str) -> Dict[str, str]:
         "decisions": os.path.join(storage_path, "decisions"),
         "questions": os.path.join(storage_path, "questions"),
         "tasks": os.path.join(storage_path, "tasks"),
+        "epics": os.path.join(storage_path, "epics"),
+        "stories": os.path.join(storage_path, "stories"),
     }
 
 def load_entities(dir_path: str) -> List[Dict[str, Any]]:
