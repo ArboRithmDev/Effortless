@@ -1,11 +1,25 @@
 ---
 name: effortless
-description: Agent-first project management methodology discipline for initialising, validating and executing development phases.
+description: Agent-first project-management methodology to initialise, validate and execute projects through OPAL phases and Story-scoped iterations.
 ---
 
 # 🛠️ Skill Effortless
 
 This Skill teaches the agent how to use the **Effortless** protocol and methodology to structure its development work without skipping steps.
+
+---
+
+## 📐 Vocabulary — three orthogonal axes (non-negotiable)
+
+These three words never overlap. Keep them strictly separate in everything you write or say:
+
+| Word | Axis | Means | Example |
+|------|------|-------|---------|
+| **phase** | Method | A stage of the OPAL process **of a Story** (`O-analyse` → `P-cadrage` → `A-specs` → `L-plan` → `E-execute`). | "advance to the next phase via `effortless_phase_next`" |
+| **Story** | Iteration | A development increment — the unit of "what am I delivering?". A Story runs through its own OPAL phases. | "open a new Story for the auth feature" |
+| **step** / **état** | Loop | An internal state of the autonomous execution state machine (`Plan` / `Implementation` / `Correction` / `Recette` / `Finished`). | "the loop returns to the Plan step" |
+
+**Rule:** "phase" designates **OPAL only** — never a Story, an iteration, or a loop step.
 
 ---
 
