@@ -980,3 +980,75 @@ def test_resolve_active_phase_ignores_current_phase_when_story_active(tmp_path):
     # (Un fallback transitoire sur state.current_phase existe encore quand aucune
     # Story n'est active, mais il va etre retire -> on ne l'assert pas ici.)
     assert resolve_active_phase(root) == "L-plan"
+
+
+def test_phase_next_advances_story_opale_phase(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # Neutraliser la barrière de validation des documents de phase.
+        monkeypatch.setattr(
+            "effortless_mcp.server.validate_phase_documents",
+            lambda **kwargs: (True, [], []),
+        )
+        # Éviter les effets de bord SecondBrain.
+        monkeypatch.setattr(
+            "effortless_mcp.server.get_secondbrain_vault_path", lambda: None
+        )
+
+        story_path = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories",
+            "STO-PROJET-01", "story.json",
+        )
+
+        # Avant : la Story active est sur la première phase OPALE.
+        with open(story_path, encoding="utf-8") as f:
+            assert json.load(f)["opale_phase"] == "O-analyse"
+
+        server.effortless_phase_next()
+
+        # Après : la phase OPALE de la Story a avancé.
+        with open(story_path, encoding="utf-8") as f:
+            assert json.load(f)["opale_phase"] == "P-cadrage"
+
+        # Aucun current_phase global ne doit être écrit dans state.json.
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        assert "current_phase" not in state
+
+        # Ni dans la config workflow.
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        assert "current_phase" not in cfg.get("workflow", {})
+
+        # La phase quittée est marquée terminée.
+        assert "O-analyse" in [cp.get("id") for cp in state.get("completed_phases", [])]
+
+
+def test_task_add_uses_active_story_phase(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_task_add("My task")
+        tsk_id = msg.split("Task ")[1].split(" ")[0]
+
+        # La tâche vit dans le dossier tasks imbriqué de la Story active.
+        nested_path = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories",
+            "STO-PROJET-01", "tasks", f"{tsk_id}.json",
+        )
+        assert os.path.exists(nested_path)
+
+        with open(nested_path, encoding="utf-8") as f:
+            task = json.load(f)
+        # La phase est estampillée depuis l'opale_phase de la Story active.
+        assert task["phase"] == "O-analyse"
+
+        # Elle ne doit PAS exister dans le dossier plat .effortless/tasks/.
+        assert not os.path.exists(
+            os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json")
+        )
