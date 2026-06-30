@@ -803,3 +803,56 @@ def test_migrate_state_to_fractal_scaffold():
         # 3. Idempotence : un second passage réel ne plante pas et ne réécrit rien.
         again = migrate_state_to_fractal(tmpdir, dry_run=False)
         assert "Already migrated" in again
+
+
+def test_migrate_state_moves_registries():
+    from effortless_mcp.services.state_migrator import migrate_state_to_fractal
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        eff_dir = os.path.join(tmpdir, ".effortless")
+        tasks_dir = os.path.join(eff_dir, "tasks")
+        decisions_dir = os.path.join(eff_dir, "decisions")
+        questions_dir = os.path.join(eff_dir, "questions")
+        os.makedirs(tasks_dir)
+        os.makedirs(decisions_dir)
+        os.makedirs(questions_dir)
+
+        with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "project_name": "effortless",
+                "current_phase": "L-plan",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_phases": [],
+            }, f)
+
+        # Registres globaux plats à déplacer.
+        for name in ("TSK-L-01.json", "TSK-L-02.json"):
+            with open(os.path.join(tasks_dir, name), "w", encoding="utf-8") as f:
+                json.dump({"id": name[:-5]}, f)
+        with open(os.path.join(decisions_dir, "DEC-01.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "DEC-01"}, f)
+        with open(os.path.join(questions_dir, "QST-01.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "QST-01"}, f)
+
+        report = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "EPIC-PROJET" in report and "STO-PROJET-01" in report
+
+        story_dir = os.path.join(eff_dir, "epics", "EPIC-PROJET", "stories", "STO-PROJET-01")
+        # Les fichiers sont désormais sous les sous-registres de la Story.
+        assert os.path.exists(os.path.join(story_dir, "tasks", "TSK-L-01.json"))
+        assert os.path.exists(os.path.join(story_dir, "tasks", "TSK-L-02.json"))
+        assert os.path.exists(os.path.join(story_dir, "decisions", "DEC-01.json"))
+        assert os.path.exists(os.path.join(story_dir, "questions", "QST-01.json"))
+
+        # Les registres globaux plats ne contiennent plus de *.json.
+        assert [n for n in os.listdir(tasks_dir) if n.endswith(".json")] == []
+        assert [n for n in os.listdir(decisions_dir) if n.endswith(".json")] == []
+        assert [n for n in os.listdir(questions_dir) if n.endswith(".json")] == []
+
+        with open(os.path.join(eff_dir, "epics", "EPIC-PROJET", "epic.json"), encoding="utf-8") as f:
+            epic = json.load(f)
+        assert "STO-PROJET-01" in epic["stories"]
+
+        # Idempotence : un second passage ne plante pas.
+        again = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "Already migrated" in again

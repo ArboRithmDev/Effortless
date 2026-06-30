@@ -1,5 +1,29 @@
 import os
 import json
+import shutil
+
+
+def _move_registry(src_dir: str, dst_dir: str) -> int:
+    """Déplace tous les fichiers *.json de src_dir vers dst_dir.
+
+    Retourne le nombre de fichiers déplacés. Source absente/vide -> 0 (silencieux).
+    Ignore sous-dossiers et fichiers non-json. En cas de collision, le fichier
+    cible est écrasé (idempotence). stdlib pure (os, shutil).
+    """
+    if not os.path.isdir(src_dir):
+        return 0
+    os.makedirs(dst_dir, exist_ok=True)
+    moved = 0
+    for name in os.listdir(src_dir):
+        src = os.path.join(src_dir, name)
+        if not os.path.isfile(src) or not name.endswith(".json"):
+            continue
+        dst = os.path.join(dst_dir, name)
+        if os.path.exists(dst):
+            os.remove(dst)
+        shutil.move(src, dst)
+        moved += 1
+    return moved
 
 
 def migrate_state_to_fractal(root: str, dry_run: bool = True) -> str:
@@ -76,7 +100,20 @@ def migrate_state_to_fractal(root: str, dry_run: bool = True) -> str:
     with open(state_path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
 
+    # 7. Déplacer les registres globaux plats vers les sous-registres de la Story.
+    eff_dir = os.path.join(root, ".effortless")
+    n_tasks = _move_registry(
+        os.path.join(eff_dir, "tasks"), os.path.join(story_dir, "tasks")
+    )
+    n_decisions = _move_registry(
+        os.path.join(eff_dir, "decisions"), os.path.join(story_dir, "decisions")
+    )
+    n_questions = _move_registry(
+        os.path.join(eff_dir, "questions"), os.path.join(story_dir, "questions")
+    )
+
     return (
         "Migrated to fractal model: created Epic EPIC-PROJET and Story STO-PROJET-01 "
-        f"(opale_phase={current_phase!r}). State pointers set; current_phase kept as transitional fallback."
+        f"(opale_phase={current_phase!r}). State pointers set; current_phase kept as transitional fallback. "
+        f"Relocated registries into STO-PROJET-01: {n_tasks} task(s), {n_decisions} decision(s), {n_questions} question(s)."
     )
