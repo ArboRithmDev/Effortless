@@ -16,6 +16,7 @@ from effortless_mcp.models.state import ProjectState, CompletedPhase
 from effortless_mcp.models.decision import Decision
 from effortless_mcp.models.question import Question
 from effortless_mcp.models.task import Task
+from effortless_mcp.models.story import Story
 from effortless_mcp.services.validation import validate_phase_documents
 from effortless_mcp.services.sync import sync_decisions_to_markdown, sync_questions_to_markdown
 from effortless_mcp.services.secondbrain import sync_phase_to_secondbrain, create_secondbrain_archive, get_secondbrain_vault_path
@@ -387,6 +388,130 @@ def effortless_init(
             f.write("---\nphase: O-analyse\nstatut: Active\n---\n\n# 📓 Domain Glossary\n\nDefine your domain terms here.\n")
 
     return f"Project '{name}' successfully initialized under {root}."
+
+@mcp.tool()
+def effortless_story_start(
+    title: str,
+    zone: Optional[str] = None,
+    description: Optional[str] = None,
+    epic_id: Optional[str] = None,
+    opale_phase: Optional[str] = None,
+    depends_on: Optional[List[str]] = None,
+    activate: bool = True,
+) -> str:
+    """
+    Crée une nouvelle Story sous un Epic existant et (par défaut) l'active.
+
+    Comble le trou [TOOLING] : sans cet outil, impossible d'amorcer une 2e Story —
+    state.active_story_id restait figé sur la première, et la boucle autonome tournait
+    à vide (backlog de l'ancienne Story tout 'Done' → faux « GOAL REACHED »).
+
+    - Epic cible : `epic_id` sinon l'Epic actif (state.active_epic_id). Doit exister.
+    - Zone : `zone` sinon celle de l'Epic. ID = STO-<ZONE>-NN (séquentiel par Epic).
+    - Phase de départ : `opale_phase` (validée) sinon la 1re phase du workflow.
+    - Scaffolde l'arbre fractal (story.json + tasks/decisions/questions) et le dossier
+      cadrage/<EPIC>/<STORY>/. Référence la Story dans epic.json (stories[], dédup).
+    - Si `activate`, bascule state.active_epic_id/active_story_id sur la nouvelle Story.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
+        return "Error: Project not initialized."
+
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    with open(paths["state"], "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+
+    # Epic cible : paramètre explicite sinon Epic actif.
+    target_epic_id = epic_id or state_data.get("active_epic_id")
+    if not target_epic_id:
+        return "Error: no target epic (pass epic_id or set an active epic first)."
+    epic_dir = get_epic_dir(root, target_epic_id)
+    epic_file = os.path.join(epic_dir, "epic.json")
+    if not os.path.exists(epic_file):
+        return f"Error: epic '{target_epic_id}' not found. Create it before adding a Story."
+    with open(epic_file, "r", encoding="utf-8") as f:
+        epic_data = json.load(f)
+
+    # Zone : paramètre sinon zone de l'Epic sinon dérivée de l'ID EPIC-<ZONE>.
+    resolved_zone = zone or epic_data.get("zone") or target_epic_id.replace("EPIC-", "")
+
+    # Phase de départ : paramètre validé contre le workflow sinon 1re phase.
+    phases_list = config_data.get("workflow", {}).get("phases", [])
+    if not phases_list:
+        return "Error: workflow has no phases configured."
+    valid_phase_ids = {p["id"] for p in phases_list}
+    start_phase = opale_phase or phases_list[0]["id"]
+    if start_phase not in valid_phase_ids:
+        return (
+            f"Error: invalid opale_phase '{start_phase}'. "
+            f"Allowed: {', '.join(p['id'] for p in phases_list)}."
+        )
+
+    # ID séquentiel PAR Epic : STO-<ZONE>-NN.
+    story_id = new_story_id(root, target_epic_id, resolved_zone)
+
+    story = Story(
+        id=story_id,
+        epic_id=target_epic_id,
+        zone=resolved_zone,
+        title=title,
+        opale_phase=start_phase,
+        status="Doing" if activate else "Todo",
+        depends_on=depends_on or [],
+    ).model_dump()
+
+    # Scaffolding fractal : fiche story.json + sous-registres tasks/decisions/questions.
+    story_paths = get_story_paths(root, target_epic_id, story_id)
+    os.makedirs(story_paths["dir"], exist_ok=True)
+    for key in ["tasks", "decisions", "questions"]:
+        os.makedirs(story_paths[key], exist_ok=True)
+    save_entity(story_paths["dir"], "story", story)
+
+    # Dossier de cadrage story-scopé : cadrage/<EPIC>/<STORY>/.
+    docs_dir = resolve_phase_docs_dir_nested(root, target_epic_id, story_id)
+    os.makedirs(docs_dir, exist_ok=True)
+
+    # Référencement dans epic.json (dédup).
+    stories = epic_data.setdefault("stories", [])
+    if story_id not in stories:
+        stories.append(story_id)
+    with open(epic_file, "w", encoding="utf-8") as f:
+        json.dump(epic_data, f, indent=2, ensure_ascii=False)
+
+    # Bascule de la Story active (modèle fractal : la phase suit la Story active).
+    activated_msg = ""
+    if activate:
+        state_data["active_epic_id"] = target_epic_id
+        state_data["active_story_id"] = story_id
+        with open(paths["state"], "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
+        activated_msg = f" Active story switched to {story_id} (phase {start_phase})."
+
+        # Si une boucle autonome existe et qu'elle s'est arrêtée (Finished/Aborted) sur
+        # le backlog de l'ANCIENNE Story, la redémarrer au Plan sur la nouvelle (goal
+        # conservé). Sans ça, le step suivant répondrait « already completed » et ne
+        # replanifierait jamais le backlog de la Story fraîche (footgun observé en dogfood).
+        loop_file = os.path.join(paths["storage"], "loop_state.json")
+        if os.path.exists(loop_file):
+            try:
+                with open(loop_file, "r", encoding="utf-8") as f:
+                    loop_state = json.load(f)
+                if loop_state.get("step") in ("Finished", "Aborted"):
+                    loop_state["step"] = "Plan"
+                    loop_state["current_task"] = None
+                    loop_state["error_count"] = 0
+                    tmp = loop_file + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(loop_state, f, indent=2, ensure_ascii=False)
+                    os.replace(tmp, loop_file)
+                    activated_msg += " Autonomous loop reset to Plan on the new story."
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    return f"Story {story_id} created under {target_epic_id} ('{title}').{activated_msg}"
 
 @mcp.tool()
 def effortless_status() -> str:

@@ -1402,3 +1402,87 @@ def test_project_uncoupled_no_io(tmp_path):
     project_task_created(str(tmp_path), task)
     project_task_transitioned(str(tmp_path), task, "Done")
     assert not os.path.isdir(os.path.join(str(tmp_path), ".effortless", "tracker_outbox"))
+
+
+# --- effortless_story_start ([TOOLING]) --------------------------------------
+
+def test_story_start_scaffolds_and_activates_new_story(monkeypatch):
+    # Comble le trou : amorcer une 2e Story sous l'Epic actif et basculer dessus.
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_story_start("Deuxième story")
+        # ID séquentiel par Epic, sous l'Epic actif (EPIC-PROJET).
+        assert "STO-PROJET-02" in msg
+
+        # Arbre fractal scaffoldé : fiche + sous-registres.
+        sdir = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-02"
+        )
+        for sub in ("story.json", "tasks", "decisions", "questions"):
+            assert os.path.exists(os.path.join(sdir, sub))
+        # Dossier de cadrage story-scopé.
+        assert os.path.isdir(os.path.join(tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-02"))
+
+        # Story démarre sur la 1re phase OPALE, statut Doing.
+        with open(os.path.join(sdir, "story.json"), encoding="utf-8") as f:
+            story = json.load(f)
+        assert story["opale_phase"] == "O-analyse"
+        assert story["status"] == "Doing"
+        assert story["epic_id"] == "EPIC-PROJET" and story["zone"] == "PROJET"
+
+        # Référencée dans epic.json (dédup), pas de doublon.
+        with open(os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "epic.json"), encoding="utf-8") as f:
+            epic = json.load(f)
+        assert epic["stories"].count("STO-PROJET-02") == 1
+
+        # Story active basculée.
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["active_story_id"] == "STO-PROJET-02"
+        assert state["active_epic_id"] == "EPIC-PROJET"
+
+        # La phase faisant autorité suit la nouvelle Story active.
+        assert server.resolve_active_phase(tmpdir) == "O-analyse"
+
+
+def test_story_start_unblocks_autonomous_loop(monkeypatch):
+    # Régression de la cause racine : une Story 'Done' faisait croire « GOAL REACHED » ;
+    # story_start ouvre une Story fraîche dont le backlog vide redonne du travail à la boucle.
+    from effortless_mcp import server
+    from effortless_mcp.services import session_loop as sl
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # Clore la story initiale (tâche unique Done) puis re-planifier : faux « GOAL REACHED ».
+        tid = server.effortless_task_add("seule", complexity="simple").split("Task ")[1].split(" ")[0]
+        server.effortless_task_update(tid, "Done")
+        server.effortless_loop_init("g")
+        assert "GOAL REACHED" in sl.step_autonomous_loop(tmpdir, "true")
+
+        # Ouvrir une nouvelle Story : la boucle a de nouveau un backlog vide à remplir.
+        server.effortless_story_start("Suite du travail")
+        out = sl.step_autonomous_loop(tmpdir, "true")
+        assert "GOAL REACHED" not in out
+        # Backlog vide de la nouvelle Story -> invite à ajouter des tâches, pas une fausse victoire.
+        assert "No tasks in the backlog" in out
+
+
+def test_story_start_validates_phase_and_epic(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # Phase OPALE invalide rejetée.
+        assert "invalid opale_phase" in server.effortless_story_start("x", opale_phase="Z-nope")
+        # Epic inexistant rejeté.
+        assert "not found" in server.effortless_story_start("x", epic_id="EPIC-GHOST")
+
+        # activate=False : la Story est créée mais l'active ne bascule pas.
+        server.effortless_story_start("non active", activate=False)
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            assert json.load(f)["active_story_id"] == "STO-PROJET-01"
