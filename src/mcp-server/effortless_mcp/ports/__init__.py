@@ -18,6 +18,7 @@ from effortless_mcp.ports.tracker import (
     register_adapter,
     resolve_tracker,
 )
+from effortless_mcp.ports.sync_journal import SyncJournal
 
 __all__ = [
     "Level",
@@ -31,4 +32,5 @@ __all__ = [
     "NullTracker",
     "register_adapter",
     "resolve_tracker",
+    "SyncJournal",
 ]
