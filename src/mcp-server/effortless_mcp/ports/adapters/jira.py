@@ -53,15 +53,19 @@ class JiraTracker:
             if match:
                 issue_types[level] = match["id"]
 
-        # Transitions : résolues depuis n'importe quelle issue du projet si dispo,
-        # sinon depuis le ProjectRef (le client peut renvoyer le schéma projet).
-        sample = next(iter(getattr(self._client, "issues", {}) or {}), project.project_id)
-        raw = self._client.get_transitions(sample)
+        # Transitions : résolues depuis une issue échantillon. Sur un projet neuf
+        # (REST, aucune issue) l'appel échoue → on tolère (transitions vides). Les
+        # types suffisent au scaffold MVP ; `transition` est post-MVP (DEC-02/08).
         transitions = {}
-        for status, target_id in _STATUS_TARGET.items():
-            tr = next((t for t in raw if t.get("to_status_id") == target_id), None)
-            if tr:
-                transitions[status] = tr["id"]
+        try:
+            sample = next(iter(getattr(self._client, "issues", {}) or {}), project.project_id)
+            raw = self._client.get_transitions(sample)
+            for status, target_id in _STATUS_TARGET.items():
+                tr = next((t for t in raw if t.get("to_status_id") == target_id), None)
+                if tr:
+                    transitions[status] = tr["id"]
+        except Exception:
+            transitions = {}
 
         self._taxonomy = Taxonomy(issue_types=issue_types, transitions=transitions)
         return self._taxonomy
