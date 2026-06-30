@@ -41,6 +41,9 @@ class ObjectPayload:
     parent_ref: Optional[TrackerRef] = None
     estimate_minutes: Optional[int] = None
     description: Optional[str] = None
+    labels: Optional[List[str]] = None   # marqueurs génériques (STO-TRACKER-02) ;
+                                         # NullTracker ignore, JiraTracker → labels Jira.
+                                         # Porte le marqueur d'idempotence du scaffold.
 
 
 @dataclass(frozen=True)
