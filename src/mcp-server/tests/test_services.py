@@ -948,3 +948,35 @@ def test_effortless_migrate_state_tool(monkeypatch):
         # Idempotence
         again = server.effortless_migrate_state(confirm=True)
         assert "Already migrated" in again
+
+
+def test_resolve_active_phase_ignores_current_phase_when_story_active(tmp_path):
+    from effortless_mcp.server import resolve_active_phase
+    root = str(tmp_path)
+    eff_dir = os.path.join(root, ".effortless")
+    story_dir = os.path.join(eff_dir, "epics", "EPIC-CORE", "stories", "STO-CORE-01")
+    os.makedirs(story_dir, exist_ok=True)
+
+    # current_phase est DELIBEREMENT different de l'opale_phase de la Story active.
+    with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x",
+            "current_phase": "O-analyse",
+            "active_epic_id": "EPIC-CORE",
+            "active_story_id": "STO-CORE-01",
+            "started_at": "t",
+            "completed_phases": [],
+        }, f)
+    with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "id": "STO-CORE-01",
+            "epic_id": "EPIC-CORE",
+            "title": "x",
+            "opale_phase": "L-plan",
+            "status": "Doing",
+        }, f)
+
+    # Invariant verrouille : quand une Story est active, current_phase est ignore.
+    # (Un fallback transitoire sur state.current_phase existe encore quand aucune
+    # Story n'est active, mais il va etre retire -> on ne l'assert pas ici.)
+    assert resolve_active_phase(root) == "L-plan"
