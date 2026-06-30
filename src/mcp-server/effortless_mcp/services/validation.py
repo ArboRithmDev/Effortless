@@ -165,16 +165,19 @@ def validate_phase_documents(
                         doc_status["errors"].append(err)
                         blocking_reasons.append(f"Invalid structure in {doc_rel_path}: {err}")
                     is_valid = False
-                
-                # Cas spécial : validation BQO
+
+                # Gate BQO impact-aware (L-04, finding dogfood Phase-001).
+                # On ne bloque PLUS la phase sur le statut binaire du document BQO
+                # (« Résolu » vs autre). Un BQO dont les questions ouvertes sont toutes
+                # de faible impact (Structuring / Minor) ne doit pas geler la transition.
+                # Le blocage est délégué au registre de questions ci-dessous, qui ne
+                # retient QUE les questions d'impact « Blocker » non résolues. Le statut
+                # « non résolu » du document reste signalé comme avertissement non bloquant.
                 is_bqo = "bqo" in doc_rel_path.lower() or "questions" in doc_rel_path.lower()
-                if is_bqo:
-                    if metadata.get("statut") not in ["Résolu", "Resolved"]:
-                        doc_status["errors"].append(
-                            f"BQO status ({metadata.get('statut')}) must be 'Résolu' or 'Resolved' to validate the phase"
-                        )
-                        blocking_reasons.append(f"Unresolved BQO: {doc_rel_path}")
-                        is_valid = False
+                if is_bqo and metadata.get("statut") not in ["Résolu", "Resolved"]:
+                    doc_status["errors"].append(
+                        f"BQO status ({metadata.get('statut')}) not resolved (non-blocking unless a Blocker question remains open)"
+                    )
 
             if len(doc_status["errors"]) == 0:
                 doc_status["is_valid"] = True
@@ -186,7 +189,9 @@ def validate_phase_documents(
 
         checklist.append(doc_status)
 
-    # 4. Validation des questions bloquantes
+    # 4. Gate impact-aware faisant autorité (L-04) : la transition de phase n'est
+    #    bloquée que par une question d'impact « Blocker » non résolue de la phase
+    #    courante. Les impacts Structuring / Minor n'ont jamais d'effet bloquant.
     if os.path.exists(questions_file_path):
         try:
             questions = load_questions_from_path(questions_file_path)
