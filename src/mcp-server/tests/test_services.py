@@ -1622,3 +1622,62 @@ def test_tracker_ack_rejects_bad_json(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
         assert "invalide" in server.effortless_tracker_ack("PROJET", "{not json")
+
+
+# --- Discover médié + issue_type_id (STO-TRACKER-04) --------------------------
+
+def test_queue_tracker_stamps_issue_type_id(tmp_path):
+    from effortless_mcp.ports import ObjectPayload, SyncJournal
+    from effortless_mcp.ports.adapters.jira import QueueTracker
+    tax = {"epic": "10000", "story": "10007", "task": "10095"}
+    j = SyncJournal(str(tmp_path))
+    qt = QueueTracker(j, taxonomy=tax)
+    qt.create(ObjectPayload(level="task", title="[PROJET] Doc"))
+    assert j.pending()[0]["args"]["issue_type_id"] == "10095"
+
+
+def test_queue_tracker_issue_type_id_null_without_taxonomy(tmp_path):
+    from effortless_mcp.ports import ObjectPayload, SyncJournal
+    from effortless_mcp.ports.adapters.jira import QueueTracker
+    j = SyncJournal(str(tmp_path))
+    QueueTracker(j).create(ObjectPayload(level="task", title="x"))
+    # Sans taxonomie ackée -> id None, pas d'échec (fallback nom).
+    op = j.pending()[0]["args"]
+    assert op["issue_type_id"] is None and op["issue_type_name"] == "Sous-tâche"
+
+
+def test_discover_ack_persists_taxonomy(monkeypatch):
+    from effortless_mcp import server
+    import json as _json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        tax = {"epic": "10000", "story": "10007", "task": "10095"}
+        out = server.effortless_tracker_discover_ack(_json.dumps(tax))
+        assert "persistée" in out
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            assert _json.load(f)["settings"]["tracker"]["taxonomy"] == tax
+
+
+def test_scaffold_ops_carry_issue_type_id_after_discover(monkeypatch):
+    from effortless_mcp import server
+    import json as _json
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_tracker_discover_ack(_json.dumps({"epic": "10000", "story": "10007", "task": "10095"}))
+        server.effortless_tracker_scaffold("PROJET")
+        data = _json.loads(server.effortless_tracker_pending().split("\n\n", 1)[1])["pending"]
+        by_type = {op["issue_type_name"]: op["issue_type_id"] for op in data}
+        assert by_type["Epic"] == "10000" and by_type["Story"] == "10007" and by_type["Sous-tâche"] == "10095"
+
+
+def test_discover_ack_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_discover_ack("{bad")
+        assert "level" in server.effortless_tracker_discover_ack('{"epic": 10000}')
