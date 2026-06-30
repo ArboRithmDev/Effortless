@@ -360,7 +360,7 @@ def effortless_status() -> str:
     
     is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
-        current_phase_id=current_phase_id,
+        active_phase_id=current_phase_id,
         required_documents=required_docs,
         questions_file_path=paths["questions"]
     )
@@ -427,7 +427,7 @@ def effortless_phase_next() -> str:
     required_docs = phase_config.get("required_documents", [])
     is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
-        current_phase_id=current_phase_id,
+        active_phase_id=current_phase_id,
         required_documents=required_docs,
         questions_file_path=paths["questions"]
     )
@@ -982,7 +982,7 @@ def build_project_overview(root: str) -> Dict[str, Any]:
 
     is_valid, checklist, blocking = validate_phase_documents(
         project_root=root,
-        current_phase_id=current_phase_id,
+        active_phase_id=current_phase_id,
         required_documents=required_docs,
         questions_file_path=paths["questions"],
     )
