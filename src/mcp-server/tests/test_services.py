@@ -457,7 +457,7 @@ def test_repo_analyzer_and_migration_planner(monkeypatch):
         report = init_migration_project(tmpdir, analysis, dry_run=False)
         assert "initialised" in report
         assert os.path.exists(os.path.join(tmpdir, "effortless.json"))
-        assert os.path.exists(os.path.join(tmpdir, ".effortless", "tasks", "TSK-M-01.json"))
+        assert os.path.exists(os.path.join(tmpdir, ".effortless", "epics", "EPIC-MIGRATION", "stories", "STO-MIGRATION-01", "tasks", "TSK-M-01.json"))
 
         # Tester l'application de la migration
         apply_report = apply_migration_project(tmpdir)
