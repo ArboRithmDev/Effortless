@@ -861,6 +861,15 @@ def effortless_task_add(
     )
 
     new_task_dump = new_task.model_dump()
+
+    # Projection tracker best-effort (DEC-05/DEC-06) : no-op sans couplage
+    # (NullTracker), enrichit tracker_id/url sinon, jamais bloquant.
+    try:
+        from effortless_mcp.ports.integration import project_task_created
+        new_task_dump = project_task_created(root, new_task_dump)
+    except Exception:
+        pass
+
     tasks.append(new_task_dump)
 
     # Sauvegarde JSON individuelle
@@ -905,6 +914,14 @@ def effortless_task_update(
 
     # Sauvegarde JSON individuelle
     save_entity(tasks_dir, task_id, target_task)
+
+    # Projection tracker best-effort (DEC-05/DEC-06) : no-op sans couplage,
+    # transition projetée ou consignée à l'outbox si tracker injoignable.
+    try:
+        from effortless_mcp.ports.integration import project_task_transitioned
+        project_task_transitioned(root, target_task, status)
+    except Exception:
+        pass
 
     return f"Task '{task_id}' updated to status '{status}'."
 

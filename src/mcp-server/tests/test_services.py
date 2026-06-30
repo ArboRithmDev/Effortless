@@ -1284,3 +1284,121 @@ def test_question_ask_syncs_under_active_story_docs_dir(monkeypatch):
         # Pas de double-préfixe root (pas de cadrage/.../cadrage/...).
         assert "cadrage/EPIC-PROJET/STO-PROJET-01/" in msg.replace(os.sep, "/")
         assert msg.count("cadrage") == 1
+
+
+# --- Port Tracker (STO-TRACKER-01) -------------------------------------------
+
+class _FakeTracker:
+    """Adapter de test : enregistre les appels, retourne une ref non vide."""
+    def __init__(self, cfg=None):
+        self.created = []
+        self.transitions = []
+    def discover_taxonomy(self, project):
+        from effortless_mcp.ports import Taxonomy
+        return Taxonomy()
+    def create(self, payload):
+        from effortless_mcp.ports import TrackerRef
+        self.created.append(payload)
+        return TrackerRef("IFX-99", "https://x/IFX-99")
+    def transition(self, ref, status):
+        self.transitions.append((ref, status))
+    def log_work(self, ref, minutes, comment):
+        pass
+    def import_tree(self, project):
+        return []
+
+
+class _BoomTracker(_FakeTracker):
+    """Adapter injoignable : lève sur create/transition."""
+    def create(self, payload):
+        raise RuntimeError("tracker offline")
+    def transition(self, ref, status):
+        raise RuntimeError("tracker offline")
+
+
+def test_null_tracker_conforms_protocol():
+    from effortless_mcp.ports import Tracker, NullTracker, resolve_tracker
+    assert isinstance(NullTracker(), Tracker)
+    # Type absent / inconnu -> NullTracker.
+    assert isinstance(resolve_tracker(None), NullTracker)
+    assert isinstance(resolve_tracker({"tracker": {"type": "unknown"}}), NullTracker)
+
+
+def test_resolve_tracker_uses_registered_adapter():
+    from effortless_mcp.ports import register_adapter, resolve_tracker
+    fake = _FakeTracker()
+    register_adapter("faketype", lambda cfg: fake)
+    assert resolve_tracker({"tracker": {"type": "faketype"}}) is fake
+
+
+def test_sync_journal_replay_idempotent(tmp_path):
+    from effortless_mcp.ports import SyncJournal
+    seq = {"n": 0}
+    def clock():
+        seq["n"] += 1
+        return f"t{seq['n']}"
+    j = SyncJournal(str(tmp_path), now=clock)
+    j.enqueue("create", {"a": 1})
+    j.enqueue("transition", {"b": 2})
+    assert [e["seq"] for e in j.pending()] == [1, 2]
+    seen = []
+    assert j.replay(lambda e: seen.append(e["seq"])) == 2
+    assert seen == [1, 2]
+    assert j.pending() == []
+    # Idempotent : un 2e replay ne rejoue rien.
+    assert j.replay(lambda e: seen.append(("AGAIN", e["seq"]))) == 0
+    # Les entrées jouées portent played + played_at.
+    played = [e for e in j._load_all() if e["played"]]
+    assert len(played) == 2 and all(e["played_at"] for e in played)
+
+
+def test_couple_project_writes_settings_and_ref(tmp_path):
+    from effortless_mcp.ports.integration import couple_project, tracker_project_ref
+    cfg_path = os.path.join(str(tmp_path), "effortless.json")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump({"settings": {}}, f)
+    ref = couple_project(str(tmp_path), "jira", "IFX", "https://x/IFX")
+    assert (ref.project_id, ref.project_url) == ("IFX", "https://x/IFX")
+    with open(cfg_path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert cfg["settings"]["tracker"] == {"type": "jira", "project_id": "IFX", "project_url": "https://x/IFX"}
+    pr = tracker_project_ref(str(tmp_path))
+    assert pr is not None and pr.project_id == "IFX"
+
+
+def test_project_task_created_persists_ref_when_coupled(tmp_path):
+    from effortless_mcp.ports import register_adapter
+    from effortless_mcp.ports.integration import project_task_created
+    fake = _FakeTracker()
+    register_adapter("faketype2", lambda cfg: fake)
+    with open(os.path.join(str(tmp_path), "effortless.json"), "w", encoding="utf-8") as f:
+        json.dump({"settings": {"tracker": {"type": "faketype2"}}}, f)
+    task = {"id": "TSK-01", "title": "x", "tracker_id": "", "tracker_url": ""}
+    out = project_task_created(str(tmp_path), task)
+    assert out["tracker_id"] == "IFX-99" and out["tracker_url"] == "https://x/IFX-99"
+    assert len(fake.created) == 1
+
+
+def test_project_task_offline_enqueues_outbox(tmp_path):
+    from effortless_mcp.ports import register_adapter, SyncJournal
+    from effortless_mcp.ports.integration import project_task_created
+    register_adapter("boomtype", lambda cfg: _BoomTracker())
+    with open(os.path.join(str(tmp_path), "effortless.json"), "w", encoding="utf-8") as f:
+        json.dump({"settings": {"tracker": {"type": "boomtype"}}}, f)
+    task = {"id": "TSK-07", "title": "x", "tracker_id": "", "tracker_url": ""}
+    out = project_task_created(str(tmp_path), task)
+    # L'opération locale n'échoue pas ; la projection est consignée.
+    assert out["tracker_id"] == ""
+    pending = SyncJournal(str(tmp_path)).pending()
+    assert len(pending) == 1 and pending[0]["op"] == "create"
+
+
+def test_project_uncoupled_no_io(tmp_path):
+    # Projet non couplé (NullTracker) : aucune écriture outbox.
+    from effortless_mcp.ports.integration import project_task_created, project_task_transitioned
+    with open(os.path.join(str(tmp_path), "effortless.json"), "w", encoding="utf-8") as f:
+        json.dump({"settings": {}}, f)
+    task = {"id": "TSK-01", "title": "x", "tracker_id": "", "tracker_url": ""}
+    project_task_created(str(tmp_path), task)
+    project_task_transitioned(str(tmp_path), task, "Done")
+    assert not os.path.isdir(os.path.join(str(tmp_path), ".effortless", "tracker_outbox"))
