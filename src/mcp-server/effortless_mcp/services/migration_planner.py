@@ -28,9 +28,10 @@ def _render_migration_preview(config: Dict[str, Any], tasks: List[Dict[str, Any]
     lines = ["🔬 MIGRATION PREVIEW (dry-run — nothing was written)\n"]
     lines.append(f"Target project: {config['project']['name']}")
     lines.append(
-        f"Target workflow: {config['workflow']['current_phase']} "
-        f"({len(config['workflow']['phases'])} migration phases)"
+        f"Target workflow: {len(config['workflow']['phases'])} migration phases "
+        f"(migration story opale_phase M-observe)"
     )
+    lines.append("Migration Epic/Story: EPIC-MIGRATION › STO-MIGRATION-01 (opale_phase M-observe)")
     lines.append(f"Migration tasks to create: {len(tasks)}")
     lines.append(f"Proposed relocations: {len(relocations)} (original hierarchy preserved)")
     if relocations:
@@ -66,7 +67,6 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
             "version": "0.1.0"
         },
         "workflow": {
-            "current_phase": "M-observe",
             "phases": [
                 {
                     "id": "M-observe",
@@ -119,7 +119,8 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
     # 2. État cible (state.json)
     state = {
         "project_name": config["project"]["name"],
-        "current_phase": "M-observe",
+        "active_epic_id": "EPIC-MIGRATION",      # NEW
+        "active_story_id": "STO-MIGRATION-01",   # NEW
         "started_at": "2026-06-28T18:00:00Z",
         "completed_phases": []
     }
@@ -160,6 +161,20 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
         }
     ]
 
+    # 3b. Epic + Story cibles (modèle fractal DEC-22) — émis pour compat resolve_active_phase.
+    epic = {
+        "id": "EPIC-MIGRATION",
+        "title": "Migration vers le framework Effortless",
+        "zone": "MIGRATION",
+        "stories": ["STO-MIGRATION-01"],
+    }
+    story = {
+        "id": "STO-MIGRATION-01",
+        "title": "Onboarding brownfield",
+        "epic_id": "EPIC-MIGRATION",
+        "opale_phase": "M-observe",
+    }
+
     # 4. Aperçu non destructif (défaut) : ne rien écrire, retourner le plan.
     already = os.path.exists(config_path) or os.path.exists(effortless_dir)
     if dry_run:
@@ -189,9 +204,14 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
 
     # 6. Écritures réelles (uniquement après dry-run levé et garde-fou franchi)
     os.makedirs(effortless_dir, exist_ok=True)
-    os.makedirs(os.path.join(effortless_dir, "tasks"), exist_ok=True)
-    os.makedirs(os.path.join(effortless_dir, "decisions"), exist_ok=True)
-    os.makedirs(os.path.join(effortless_dir, "questions"), exist_ok=True)
+
+    # Stockage fractal imbriqué (DEC-22) — chemins construits inline (pas d'import server.py : circulaire).
+    epic_dir = os.path.join(effortless_dir, "epics", "EPIC-MIGRATION")
+    story_dir = os.path.join(epic_dir, "stories", "STO-MIGRATION-01")
+    story_tasks_dir = os.path.join(story_dir, "tasks")
+    os.makedirs(story_tasks_dir, exist_ok=True)
+    os.makedirs(os.path.join(story_dir, "decisions"), exist_ok=True)
+    os.makedirs(os.path.join(story_dir, "questions"), exist_ok=True)
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
@@ -199,8 +219,14 @@ def init_migration_project(repo_path: str, analysis: Dict[str, Any],
     with open(os.path.join(effortless_dir, "state.json"), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
 
+    with open(os.path.join(epic_dir, "epic.json"), "w", encoding="utf-8") as f:
+        json.dump(epic, f, indent=2, ensure_ascii=False)
+
+    with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+        json.dump(story, f, indent=2, ensure_ascii=False)
+
     for t in tasks:
-        with open(os.path.join(effortless_dir, "tasks", f"{t['id']}.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(story_tasks_dir, f"{t['id']}.json"), "w", encoding="utf-8") as f:
             json.dump(t, f, indent=2, ensure_ascii=False)
 
     with open(os.path.join(effortless_dir, "migration_plan.json"), "w", encoding="utf-8") as f:

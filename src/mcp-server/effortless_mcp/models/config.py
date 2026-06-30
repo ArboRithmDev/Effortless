@@ -13,7 +13,6 @@ class PhaseConfig(BaseModel):
     required_documents: List[str] = Field(default_factory=list)
 
 class WorkflowConfig(BaseModel):
-    current_phase: str
     phases: List[PhaseConfig]
 
 class SettingsConfig(BaseModel):

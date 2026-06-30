@@ -457,7 +457,7 @@ def test_repo_analyzer_and_migration_planner(monkeypatch):
         report = init_migration_project(tmpdir, analysis, dry_run=False)
         assert "initialised" in report
         assert os.path.exists(os.path.join(tmpdir, "effortless.json"))
-        assert os.path.exists(os.path.join(tmpdir, ".effortless", "tasks", "TSK-M-01.json"))
+        assert os.path.exists(os.path.join(tmpdir, ".effortless", "epics", "EPIC-MIGRATION", "stories", "STO-MIGRATION-01", "tasks", "TSK-M-01.json"))
 
         # Tester l'application de la migration
         apply_report = apply_migration_project(tmpdir)
@@ -562,24 +562,25 @@ def test_task_add_stores_and_validates_complexity(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "tasks")
 
         # complexity valide stockée
         msg = server.effortless_task_add("T simple", complexity="simple")
         tsk_id = msg.split("Task ")[1].split(" ")[0]
-        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
+        with open(os.path.join(tasks_dir, f"{tsk_id}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] == "simple"
 
         # absente => None
         msg2 = server.effortless_task_add("T sans")
         tsk_id2 = msg2.split("Task ")[1].split(" ")[0]
-        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id2}.json"), encoding="utf-8") as f:
+        with open(os.path.join(tasks_dir, f"{tsk_id2}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] is None
 
         # valeur invalide rejetée, pas d'écriture
-        before = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
+        before = len(os.listdir(tasks_dir))
         bad = server.effortless_task_add("T bad", complexity="trivial")
         assert "invalid" in bad
-        after = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
+        after = len(os.listdir(tasks_dir))
         assert before == after
 
 
@@ -588,13 +589,14 @@ def test_task_classify(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "tasks")
         msg = server.effortless_task_add("T")
         tsk_id = msg.split("Task ")[1].split(" ")[0]
 
         # classification réussie
         ok = server.effortless_task_classify(tsk_id, "complex")
         assert tsk_id in ok and "complex" in ok
-        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
+        with open(os.path.join(tasks_dir, f"{tsk_id}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] == "complex"
 
         # valeur invalide
@@ -610,7 +612,7 @@ def test_loop_plan_delegation_branches(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
-        tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "tasks")
 
         def add(title, complexity=None):
             msg = server.effortless_task_add(title, complexity=complexity)
@@ -690,3 +692,363 @@ def test_get_paths_exposes_epics_and_stories(tmp_path):
     assert "stories" in paths
     assert paths["epics"].endswith("epics")
     assert paths["stories"].endswith("stories")
+
+
+def test_new_epic_id():
+    from effortless_mcp.server import new_epic_id
+    assert new_epic_id("core") == "EPIC-CORE"
+
+
+def test_get_story_paths_nested_layout(tmp_path):
+    from effortless_mcp.server import get_story_paths
+    root = str(tmp_path)
+    paths = get_story_paths(root, "EPIC-CORE", "STO-CORE-01")
+    expected_tasks = os.path.join(
+        ".effortless", "epics", "EPIC-CORE", "stories", "STO-CORE-01", "tasks"
+    )
+    assert paths["tasks"].endswith(expected_tasks)
+    assert paths["story"].endswith("story.json")
+
+
+def test_new_story_id_sequence_per_epic(tmp_path):
+    from effortless_mcp.server import new_story_id
+    root = str(tmp_path)
+    os.makedirs(
+        os.path.join(root, ".effortless", "epics", "EPIC-CORE", "stories", "STO-CORE-01"),
+        exist_ok=True,
+    )
+    assert new_story_id(root, "EPIC-CORE", "CORE") == "STO-CORE-02"
+
+
+def test_get_active_story_nested(tmp_path):
+    from effortless_mcp.server import get_active_story
+    root = str(tmp_path)
+    eff_dir = os.path.join(root, ".effortless")
+    story_dir = os.path.join(eff_dir, "epics", "EPIC-CORE", "stories", "STO-CORE-01")
+    os.makedirs(story_dir, exist_ok=True)
+
+    with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x",
+            "current_phase": "L-plan",
+            "active_epic_id": "EPIC-CORE",
+            "active_story_id": "STO-CORE-01",
+            "started_at": "t",
+            "completed_phases": [],
+        }, f)
+    with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "id": "STO-CORE-01",
+            "epic_id": "EPIC-CORE",
+            "title": "x",
+            "opale_phase": "A-specs",
+        }, f)
+
+    assert get_active_story(root)["opale_phase"] == "A-specs"
+
+    # Sans pointeurs actifs -> None.
+    other_root = os.path.join(root, "no-active")
+    other_eff = os.path.join(other_root, ".effortless")
+    os.makedirs(other_eff, exist_ok=True)
+    with open(os.path.join(other_eff, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x",
+            "current_phase": "L-plan",
+            "started_at": "t",
+            "completed_phases": [],
+        }, f)
+    assert get_active_story(other_root) is None
+
+
+def test_migrate_state_to_fractal_scaffold():
+    from effortless_mcp.services.state_migrator import migrate_state_to_fractal
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        eff_dir = os.path.join(tmpdir, ".effortless")
+        os.makedirs(eff_dir)
+        state_path = os.path.join(eff_dir, "state.json")
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "project_name": "effortless",
+                "current_phase": "L-plan",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_phases": [],
+            }, f)
+
+        epic_path = os.path.join(eff_dir, "epics", "EPIC-PROJET", "epic.json")
+        story_path = os.path.join(
+            eff_dir, "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "story.json"
+        )
+
+        # 1. Dry-run (défaut) : aperçu non destructif, rien n'est écrit.
+        preview = migrate_state_to_fractal(tmpdir)
+        assert "PREVIEW" in preview
+        assert not os.path.exists(epic_path)
+        assert not os.path.exists(story_path)
+
+        # 2. Réel : scaffolde Epic + Story et positionne les pointeurs.
+        report = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "EPIC-PROJET" in report and "STO-PROJET-01" in report
+        assert os.path.exists(epic_path)
+        assert os.path.exists(story_path)
+
+        with open(story_path, encoding="utf-8") as f:
+            story = json.load(f)
+        assert story["opale_phase"] == "L-plan"
+
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["active_epic_id"] == "EPIC-PROJET"
+        assert state["active_story_id"] == "STO-PROJET-01"
+        assert state["current_phase"] == "L-plan"  # conservé (fallback transitoire)
+
+        # 3. Idempotence : un second passage réel ne plante pas et ne réécrit rien.
+        again = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "Already migrated" in again
+
+
+def test_migrate_state_moves_registries():
+    from effortless_mcp.services.state_migrator import migrate_state_to_fractal
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        eff_dir = os.path.join(tmpdir, ".effortless")
+        tasks_dir = os.path.join(eff_dir, "tasks")
+        decisions_dir = os.path.join(eff_dir, "decisions")
+        questions_dir = os.path.join(eff_dir, "questions")
+        os.makedirs(tasks_dir)
+        os.makedirs(decisions_dir)
+        os.makedirs(questions_dir)
+
+        with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "project_name": "effortless",
+                "current_phase": "L-plan",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_phases": [],
+            }, f)
+
+        # Registres globaux plats à déplacer.
+        for name in ("TSK-L-01.json", "TSK-L-02.json"):
+            with open(os.path.join(tasks_dir, name), "w", encoding="utf-8") as f:
+                json.dump({"id": name[:-5]}, f)
+        with open(os.path.join(decisions_dir, "DEC-01.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "DEC-01"}, f)
+        with open(os.path.join(questions_dir, "QST-01.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "QST-01"}, f)
+
+        report = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "EPIC-PROJET" in report and "STO-PROJET-01" in report
+
+        story_dir = os.path.join(eff_dir, "epics", "EPIC-PROJET", "stories", "STO-PROJET-01")
+        # Les fichiers sont désormais sous les sous-registres de la Story.
+        assert os.path.exists(os.path.join(story_dir, "tasks", "TSK-L-01.json"))
+        assert os.path.exists(os.path.join(story_dir, "tasks", "TSK-L-02.json"))
+        assert os.path.exists(os.path.join(story_dir, "decisions", "DEC-01.json"))
+        assert os.path.exists(os.path.join(story_dir, "questions", "QST-01.json"))
+
+        # Les registres globaux plats ne contiennent plus de *.json.
+        assert [n for n in os.listdir(tasks_dir) if n.endswith(".json")] == []
+        assert [n for n in os.listdir(decisions_dir) if n.endswith(".json")] == []
+        assert [n for n in os.listdir(questions_dir) if n.endswith(".json")] == []
+
+        with open(os.path.join(eff_dir, "epics", "EPIC-PROJET", "epic.json"), encoding="utf-8") as f:
+            epic = json.load(f)
+        assert "STO-PROJET-01" in epic["stories"]
+
+        # Idempotence : un second passage ne plante pas.
+        again = migrate_state_to_fractal(tmpdir, dry_run=False)
+        assert "Already migrated" in again
+
+
+def test_migrate_state_relocates_cadrage_and_rewrites_config():
+    from effortless_mcp.services.state_migrator import migrate_state_to_fractal
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        eff_dir = os.path.join(tmpdir, ".effortless")
+        os.makedirs(eff_dir)
+
+        with open(os.path.join(tmpdir, "effortless.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "settings": {"storage_dir": ".effortless", "documents_dir": "cadrage/Phase-001"},
+                "workflow": {"phases": [{
+                    "id": "L-plan",
+                    "name": "Lancer",
+                    "required_documents": ["cadrage/Phase-001/07-MET-PLN-plan-action.md"],
+                }]},
+                "project": {"name": "effortless"},
+            }, f, ensure_ascii=False)
+
+        with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "project_name": "effortless",
+                "current_phase": "L-plan",
+                "started_at": "2026-01-01T00:00:00Z",
+                "completed_phases": [],
+            }, f)
+
+        doc_dir = os.path.join(tmpdir, "cadrage", "Phase-001")
+        os.makedirs(doc_dir)
+        with open(os.path.join(doc_dir, "07-MET-PLN-plan-action.md"), "w", encoding="utf-8") as f:
+            f.write("# Plan d'action\n\nContenu de cadrage.\n")
+
+        migrate_state_to_fractal(tmpdir, dry_run=False)
+
+        new_doc = os.path.join(tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01", "07-MET-PLN-plan-action.md")
+        old_doc = os.path.join(tmpdir, "cadrage", "Phase-001", "07-MET-PLN-plan-action.md")
+        assert os.path.exists(new_doc)
+        assert not os.path.exists(old_doc)
+
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            config = json.load(f)
+        assert config["settings"]["documents_dir"] == "cadrage/EPIC-PROJET/STO-PROJET-01"
+        phase = config["workflow"]["phases"][0]
+        assert phase["id"] == "L-plan"
+        assert phase["required_documents"] == ["cadrage/EPIC-PROJET/STO-PROJET-01/07-MET-PLN-plan-action.md"]
+
+
+def test_effortless_migrate_state_tool(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # effortless_init est désormais fractal-native (L-31). Pour exercer l'outil de
+        # migration legacy -> fractal, on ramène le projet à un état plat pré-fractal :
+        # suppression de l'arbre epics/ scaffoldé et retrait des pointeurs d'état.
+        import shutil
+        shutil.rmtree(os.path.join(tmpdir, ".effortless", "epics"))
+        state_path = os.path.join(tmpdir, ".effortless", "state.json")
+        with open(state_path, encoding="utf-8") as f:
+            _st = json.load(f)
+        _st.pop("active_epic_id", None)
+        _st.pop("active_story_id", None)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(_st, f, indent=2, ensure_ascii=False)
+
+        epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "epic.json")
+        story_file = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "story.json"
+        )
+
+        # Aperçu (confirm=False) : non destructif
+        preview = server.effortless_migrate_state()
+        assert "PREVIEW" in preview
+        assert not os.path.exists(epic_file)
+
+        # Application (confirm=True)
+        applied = server.effortless_migrate_state(confirm=True)
+        assert os.path.exists(epic_file)
+        assert os.path.exists(story_file)
+
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["active_epic_id"] == "EPIC-PROJET"
+        assert state["active_story_id"] == "STO-PROJET-01"
+
+        # Idempotence
+        again = server.effortless_migrate_state(confirm=True)
+        assert "Already migrated" in again
+
+
+def test_resolve_active_phase_ignores_current_phase_when_story_active(tmp_path):
+    from effortless_mcp.server import resolve_active_phase
+    root = str(tmp_path)
+    eff_dir = os.path.join(root, ".effortless")
+    story_dir = os.path.join(eff_dir, "epics", "EPIC-CORE", "stories", "STO-CORE-01")
+    os.makedirs(story_dir, exist_ok=True)
+
+    # current_phase est DELIBEREMENT different de l'opale_phase de la Story active.
+    with open(os.path.join(eff_dir, "state.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "project_name": "x",
+            "current_phase": "O-analyse",
+            "active_epic_id": "EPIC-CORE",
+            "active_story_id": "STO-CORE-01",
+            "started_at": "t",
+            "completed_phases": [],
+        }, f)
+    with open(os.path.join(story_dir, "story.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "id": "STO-CORE-01",
+            "epic_id": "EPIC-CORE",
+            "title": "x",
+            "opale_phase": "L-plan",
+            "status": "Doing",
+        }, f)
+
+    # Invariant verrouille : quand une Story est active, current_phase est ignore.
+    # (Un fallback transitoire sur state.current_phase existe encore quand aucune
+    # Story n'est active, mais il va etre retire -> on ne l'assert pas ici.)
+    assert resolve_active_phase(root) == "L-plan"
+
+
+def test_phase_next_advances_story_opale_phase(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        # Neutraliser la barrière de validation des documents de phase.
+        monkeypatch.setattr(
+            "effortless_mcp.server.validate_phase_documents",
+            lambda **kwargs: (True, [], []),
+        )
+        # Éviter les effets de bord SecondBrain.
+        monkeypatch.setattr(
+            "effortless_mcp.server.get_secondbrain_vault_path", lambda: None
+        )
+
+        story_path = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories",
+            "STO-PROJET-01", "story.json",
+        )
+
+        # Avant : la Story active est sur la première phase OPALE.
+        with open(story_path, encoding="utf-8") as f:
+            assert json.load(f)["opale_phase"] == "O-analyse"
+
+        server.effortless_phase_next()
+
+        # Après : la phase OPALE de la Story a avancé.
+        with open(story_path, encoding="utf-8") as f:
+            assert json.load(f)["opale_phase"] == "P-cadrage"
+
+        # Aucun current_phase global ne doit être écrit dans state.json.
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        assert "current_phase" not in state
+
+        # Ni dans la config workflow.
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        assert "current_phase" not in cfg.get("workflow", {})
+
+        # La phase quittée est marquée terminée.
+        assert "O-analyse" in [cp.get("id") for cp in state.get("completed_phases", [])]
+
+
+def test_task_add_uses_active_story_phase(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        msg = server.effortless_task_add("My task")
+        tsk_id = msg.split("Task ")[1].split(" ")[0]
+
+        # La tâche vit dans le dossier tasks imbriqué de la Story active.
+        nested_path = os.path.join(
+            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories",
+            "STO-PROJET-01", "tasks", f"{tsk_id}.json",
+        )
+        assert os.path.exists(nested_path)
+
+        with open(nested_path, encoding="utf-8") as f:
+            task = json.load(f)
+        # La phase est estampillée depuis l'opale_phase de la Story active.
+        assert task["phase"] == "O-analyse"
+
+        # Elle ne doit PAS exister dans le dossier plat .effortless/tasks/.
+        assert not os.path.exists(
+            os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json")
+        )

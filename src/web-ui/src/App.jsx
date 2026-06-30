@@ -210,7 +210,7 @@ export default function App() {
           </div>
         </div>
         <div className="status-block">
-          <span className="badge phase-badge">{data.phase_name} · {data.current_phase}</span>
+          <span className="badge phase-badge">{data.phase_name} · {data.opale_phase ?? data.current_phase ?? '—'}</span>
           <span className={`badge ${data.is_valid ? 'st-ok' : 'st-block'}`}>
             {data.is_valid ? '✅ Phase validable' : '❌ Barrière bloquée'}
           </span>

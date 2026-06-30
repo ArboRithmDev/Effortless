@@ -90,7 +90,7 @@ def load_questions_from_path(path: str) -> List[Dict[str, Any]]:
 
 def validate_phase_documents(
     project_root: str,
-    current_phase_id: str,
+    active_phase_id: str,
     required_documents: List[str],
     questions_file_path: str
 ) -> Tuple[bool, List[Dict[str, Any]], List[str]]:
@@ -146,9 +146,9 @@ def validate_phase_documents(
                     doc_status["errors"].append("Missing 'phase' field in frontmatter")
                     blocking_reasons.append(f"Missing 'phase' field in {doc_rel_path}")
                     is_valid = False
-                elif metadata["phase"] != current_phase_id:
+                elif metadata["phase"] != active_phase_id:
                     doc_status["errors"].append(
-                        f"Document phase ({metadata['phase']}) does not match active phase ({current_phase_id})"
+                        f"Document phase ({metadata['phase']}) does not match active phase ({active_phase_id})"
                     )
                     blocking_reasons.append(f"Inconsistent phase in {doc_rel_path}")
                     is_valid = False
@@ -192,7 +192,7 @@ def validate_phase_documents(
             questions = load_questions_from_path(questions_file_path)
             for q in questions:
                 if (
-                    q.get("phase") == current_phase_id
+                    q.get("phase") == active_phase_id
                     and str(q.get("impact", "")).lower() == "blocker"
                     and q.get("status") not in ["Resolved", "Résolu"]
                 ):

@@ -24,6 +24,7 @@ from effortless_mcp.services.deploy import deploy_to_mcp_clients
 from effortless_mcp.services.repo_analyzer import analyze_target_repo
 from effortless_mcp.services.migration_planner import init_migration_project, apply_migration_project
 from effortless_mcp.services.session_loop import init_autonomous_loop, step_autonomous_loop
+from effortless_mcp.services.state_migrator import migrate_state_to_fractal
 
 
 
@@ -135,6 +136,89 @@ def save_entity(dir_path: str, entity_id: str, entity_data: Dict[str, Any]) -> N
         json.dump(entity_data, f, indent=2, ensure_ascii=False)
 
 
+def get_active_story(root: str) -> Optional[Dict[str, Any]]:
+    """Retourne la Story active depuis l'arbre nested epics/<EPIC>/stories/<STORY>/.
+
+    Designee par state.active_epic_id + state.active_story_id ; sa fiche est le
+    story.json dans get_story_dir(...). Sans pointeurs ou sans fiche, retourne None.
+    """
+    paths = get_paths(root)
+    if not os.path.exists(paths["state"]):
+        return None
+    try:
+        with open(paths["state"], "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    epic_id = state_data.get("active_epic_id")
+    story_id = state_data.get("active_story_id")
+    if not epic_id or not story_id:
+        return None
+    story_file = get_story_paths(root, epic_id, story_id)["story"]
+    if not os.path.exists(story_file):
+        return None
+    try:
+        with open(story_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def resolve_active_phase(root: str) -> Optional[str]:
+    """Phase OPALE faisant autorité : opale_phase de la Story active."""
+    story = get_active_story(root)
+    if story is not None and story.get("opale_phase"):
+        return story["opale_phase"]
+    return None
+
+
+# --- Couche stockage fractal (DEC-22/23) : nested epics/<EPIC>/stories/<STORY>/ ---
+
+def get_epic_dir(root: str, epic_id: str) -> str:
+    """Dossier physique d'un Epic : .effortless/epics/<EPIC>/."""
+    return os.path.join(get_paths(root)["epics"], epic_id)
+
+
+def get_story_dir(root: str, epic_id: str, story_id: str) -> str:
+    """Dossier physique d'une Story : .effortless/epics/<EPIC>/stories/<STORY>/."""
+    return os.path.join(get_epic_dir(root, epic_id), "stories", story_id)
+
+
+def get_story_paths(root: str, epic_id: str, story_id: str) -> Dict[str, str]:
+    """Chemins clés d'une Story : sa fiche + ses sous-registres tasks/decisions/questions."""
+    sdir = get_story_dir(root, epic_id, story_id)
+    return {
+        "dir": sdir,
+        "story": os.path.join(sdir, "story.json"),
+        "tasks": os.path.join(sdir, "tasks"),
+        "decisions": os.path.join(sdir, "decisions"),
+        "questions": os.path.join(sdir, "questions"),
+    }
+
+
+def new_epic_id(zone: str) -> str:
+    """ID d'Epic lisible scopé zone : EPIC-<ZONE>."""
+    return f"EPIC-{zone.upper()}"
+
+
+def new_story_id(root: str, epic_id: str, zone: str) -> str:
+    """ID de Story sequentiel PAR Epic : STO-<ZONE>-NN (NN = max existant dans l'Epic + 1)."""
+    stories_dir = os.path.join(get_epic_dir(root, epic_id), "stories")
+    existing = os.listdir(stories_dir) if os.path.isdir(stories_dir) else []
+    return next_sequential_id(existing, f"STO-{zone.upper()}-")
+
+
+def new_entity_id(entity_dir: str, prefix: str) -> str:
+    """ID d'entite sequentiel DANS une Story (TSK-NN / DEC-NN / Q-NN). Repart a 1 par Story."""
+    existing = [e.get("id", "") for e in load_entities(entity_dir)]
+    return next_sequential_id(existing, prefix)
+
+
+def resolve_phase_docs_dir_nested(root: str, epic_id: str, story_id: str, documents_root: str = "cadrage") -> str:
+    """Docs de cadrage Story-scopes : cadrage/<EPIC>/<STORY>/ (DEC-23)."""
+    return os.path.join(root, documents_root, epic_id, story_id)
+
+
 # --- 1. Outils d'Initialisation & Statut ---
 
 @mcp.tool()
@@ -159,7 +243,6 @@ def effortless_init(
     config = EffortlessConfig(
         project=ProjectMeta(name=name, description=description, version="0.1.0"),
         workflow=WorkflowConfig(
-            current_phase="O-analyse",
             phases=[
                 PhaseConfig(
                     id="O-analyse",
@@ -212,10 +295,31 @@ def effortless_init(
     # Création du dossier .effortless
     os.makedirs(paths["storage"], exist_ok=True)
 
-    # Initialisation de state.json
+    # Scaffolding fractal par défaut (L-31) : Epic + Story racine pour que le projet
+    # fraîchement initialisé résolve sa phase via la Story active dès le départ.
+    first_phase_id = config.workflow.phases[0].id
+    epic = {
+        "id": "EPIC-PROJET",
+        "zone": "PROJET",
+        "title": "Cadrage & pilotage du projet",
+        "description": "Epic racine du projet (modèle fractal).",
+        "status": "Open",
+        "stories": ["STO-PROJET-01"],
+    }
+    story = {
+        "id": "STO-PROJET-01",
+        "epic_id": "EPIC-PROJET",
+        "zone": "PROJET",
+        "title": "Story par défaut — progression du projet",
+        "opale_phase": first_phase_id,
+        "status": "Doing",
+    }
+
+    # Initialisation de state.json (avec pointeurs vers la Story active fractale)
     state = ProjectState(
         project_name=name,
-        current_phase="O-analyse",
+        active_epic_id="EPIC-PROJET",
+        active_story_id="STO-PROJET-01",
         started_at=_utc_now_iso()
     )
     with open(paths["state"], "w", encoding="utf-8") as f:
@@ -224,6 +328,17 @@ def effortless_init(
     # Initialisation des répertoires d'entités
     for key in ["decisions", "questions", "tasks"]:
         os.makedirs(paths[key], exist_ok=True)
+
+    # Création de l'arbre fractal nested epics/<EPIC>/stories/<STORY>/{tasks,decisions,questions}
+    epic_dir = get_epic_dir(root, "EPIC-PROJET")
+    story_paths = get_story_paths(root, "EPIC-PROJET", "STO-PROJET-01")
+    os.makedirs(epic_dir, exist_ok=True)
+    for key in ["tasks", "decisions", "questions"]:
+        os.makedirs(story_paths[key], exist_ok=True)
+    with open(os.path.join(epic_dir, "epic.json"), "w", encoding="utf-8") as f:
+        json.dump(epic, f, indent=2, ensure_ascii=False)
+    with open(story_paths["story"], "w", encoding="utf-8") as f:
+        json.dump(story, f, indent=2, ensure_ascii=False)
 
     # Création du dossier de documents
     os.makedirs(os.path.join(root, "cadrage", "Phase-001"), exist_ok=True)
@@ -252,8 +367,9 @@ def effortless_status() -> str:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    current_phase_id = state_data.get("current_phase")
-    
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
+
     # Trouver la phase de configuration correspondante
     phases_list = config_data.get("workflow", {}).get("phases", [])
     phase_config = next((p for p in phases_list if p["id"] == current_phase_id), None)
@@ -265,7 +381,7 @@ def effortless_status() -> str:
     
     is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
-        current_phase_id=current_phase_id,
+        active_phase_id=current_phase_id,
         required_documents=required_docs,
         questions_file_path=paths["questions"]
     )
@@ -314,9 +430,10 @@ def effortless_phase_next() -> str:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
-    
+
     # Trouver l'index de la phase en cours
     current_idx = next((i for i, p in enumerate(phases_list) if p["id"] == current_phase_id), -1)
 
@@ -331,7 +448,7 @@ def effortless_phase_next() -> str:
     required_docs = phase_config.get("required_documents", [])
     is_valid, checklist, blocking_reasons = validate_phase_documents(
         project_root=root,
-        current_phase_id=current_phase_id,
+        active_phase_id=current_phase_id,
         required_documents=required_docs,
         questions_file_path=paths["questions"]
     )
@@ -349,16 +466,18 @@ def effortless_phase_next() -> str:
             "id": current_phase_id,
             "completed_at": _utc_now_iso()
         })
-    state_data["current_phase"] = next_phase["id"]
+    # Modèle fractal : si une Story est active, c'est SA phase OPALE qui avance.
+    # On persiste le nouveau palier dans son story.json (source de vérité fractale).
+    active_story = get_active_story(root)
+    if active_story is not None:
+        active_story["opale_phase"] = next_phase["id"]
+        story_paths = get_story_paths(
+            root, state_data.get("active_epic_id"), state_data.get("active_story_id")
+        )
+        save_entity(story_paths["dir"], "story", active_story)
 
     with open(paths["state"], "w", encoding="utf-8") as f:
         json.dump(state_data, f, indent=2, ensure_ascii=False)
-
-    # C3 : garder effortless.json en phase avec state.json (sinon le config conserve une
-    # phase morte que les consommateurs externes — Web UI — afficheraient à tort).
-    config_data.setdefault("workflow", {})["current_phase"] = next_phase["id"]
-    with open(paths["config"], "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=2, ensure_ascii=False)
 
     # --- Symbiose SecondBrain ---
     project_slug = state_data.get("project_name", "effortless").lower()
@@ -408,7 +527,8 @@ def effortless_decision_add(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
 
     decisions = load_entities(paths["decisions"])
 
@@ -482,7 +602,8 @@ def effortless_question_ask(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
     project_name = state_data.get("project_name")
 
     questions = load_entities(paths["questions"])
@@ -623,23 +744,36 @@ def effortless_task_add(
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
 
-    tasks = load_entities(paths["tasks"])
-
-    # Déterminer le préfixe basé sur la phase active
-    parts = current_phase_id.split("-")
-    if len(parts) >= 3 and parts[0].lower() == "phase":
-        prefix = "-".join(parts[:3])
-    elif len(parts) >= 1:
-        prefix = parts[0]
+    # Modèle fractal : si une Story est active, la tâche est créée dans SON sous-registre
+    # tasks/ avec un ID séquentiel par Story (TSK-NN). Sinon, comportement global historique.
+    active_story = get_active_story(root)
+    if active_story is not None:
+        story_paths = get_story_paths(
+            root, state_data.get("active_epic_id"), state_data.get("active_story_id")
+        )
+        tasks_dir = story_paths["tasks"]
+        tasks = load_entities(tasks_dir)
+        tsk_id = new_entity_id(tasks_dir, "TSK-")
     else:
-        prefix = "TSK"
+        tasks_dir = paths["tasks"]
+        tasks = load_entities(tasks_dir)
 
-    # ID = max existant pour CE préfixe + 1 : préfixe et index restent cohérents, et la
-    # suppression d'une tâche ne provoque ni réutilisation ni écrasement (B1/B5).
-    tsk_prefix = f"TSK-{prefix}-"
-    tsk_id = next_sequential_id([t.get("id", "") for t in tasks], tsk_prefix)
+        # Déterminer le préfixe basé sur la phase active
+        parts = current_phase_id.split("-")
+        if len(parts) >= 3 and parts[0].lower() == "phase":
+            prefix = "-".join(parts[:3])
+        elif len(parts) >= 1:
+            prefix = parts[0]
+        else:
+            prefix = "TSK"
+
+        # ID = max existant pour CE préfixe + 1 : préfixe et index restent cohérents, et la
+        # suppression d'une tâche ne provoque ni réutilisation ni écrasement (B1/B5).
+        tsk_prefix = f"TSK-{prefix}-"
+        tsk_id = next_sequential_id([t.get("id", "") for t in tasks], tsk_prefix)
 
     new_task = Task(
         id=tsk_id,
@@ -655,7 +789,7 @@ def effortless_task_add(
     tasks.append(new_task_dump)
 
     # Sauvegarde JSON individuelle
-    save_entity(paths["tasks"], tsk_id, new_task_dump)
+    save_entity(tasks_dir, tsk_id, new_task_dump)
 
     return f"Task {tsk_id} created ('{title}') for phase {current_phase_id}."
 
@@ -715,13 +849,21 @@ def effortless_task_classify(
     if complexity not in ("simple", "complex"):
         return f"Error: invalid complexity '{complexity}'. Allowed values: simple, complex."
 
-    tasks = load_entities(paths["tasks"])
+    # Modèle fractal : la tâche vit dans le sous-registre tasks/ de la Story active si
+    # présente ; sinon, registre global historique (cohérent avec effortless_task_add).
+    active_story = get_active_story(root)
+    if active_story is not None:
+        tasks_dir = get_story_paths(root, active_story["epic_id"], active_story["id"])["tasks"]
+    else:
+        tasks_dir = paths["tasks"]
+
+    tasks = load_entities(tasks_dir)
     target = next((t for t in tasks if t["id"] == task_id), None)
     if not target:
         return f"Error: Task '{task_id}' not found."
 
     target["complexity"] = complexity
-    save_entity(paths["tasks"], task_id, target)
+    save_entity(tasks_dir, task_id, target)
 
     return f"Task '{task_id}' classified as '{complexity}'."
 
@@ -738,7 +880,8 @@ def effortless_secondbrain_sync() -> str:
 
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
     project_slug = state_data.get("project_name", "effortless").lower()
 
     vault_path = get_secondbrain_vault_path()
@@ -851,14 +994,15 @@ def build_project_overview(root: str) -> Dict[str, Any]:
     with open(paths["state"], "r", encoding="utf-8") as f:
         state_data = json.load(f)
 
-    current_phase_id = state_data.get("current_phase")
+    # Phase faisant autorité : opale_phase de la Story active.
+    current_phase_id = resolve_active_phase(root)
     phases_list = config_data.get("workflow", {}).get("phases", [])
     phase_cfg = next((p for p in phases_list if p["id"] == current_phase_id), None)
     required_docs = phase_cfg.get("required_documents", []) if phase_cfg else []
 
     is_valid, checklist, blocking = validate_phase_documents(
         project_root=root,
-        current_phase_id=current_phase_id,
+        active_phase_id=current_phase_id,
         required_documents=required_docs,
         questions_file_path=paths["questions"],
     )
@@ -988,6 +1132,21 @@ def effortless_migrate_apply(target_path: str, dry_run: bool = False) -> str:
         return apply_migration_project(target_path, dry_run=dry_run)
     except Exception as e:
         return f"Error applying migration: {str(e)}"
+
+@mcp.tool()
+def effortless_migrate_state(confirm: bool = False) -> str:
+    """
+    Migre un projet Effortless plat vers le modèle fractal (Epic / Story).
+
+    Sûr par défaut : sans `confirm=True`, retourne un APERÇU non destructif (rien n'est écrit).
+    `confirm=True` applique réellement la migration : scaffolde EPIC-PROJET / STO-PROJET-01,
+    déplace les registres, relocalise le cadrage, réécrit la config et positionne les pointeurs d'état.
+    """
+    try:
+        root = get_project_root()
+        return migrate_state_to_fractal(root, dry_run=not confirm)
+    except Exception as e:
+        return f"Error migrating state to fractal model: {str(e)}"
 
 @mcp.tool()
 def effortless_loop_init(goal: str) -> str:
