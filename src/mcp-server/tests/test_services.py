@@ -639,3 +639,54 @@ def test_loop_plan_delegation_branches(monkeypatch):
             assert _json.load(f)["step"] == "Implementation"
         with open(os.path.join(tasks_dir, f"{t_none}.json"), encoding="utf-8") as f:
             assert _json.load(f)["status"] == "Doing"
+
+
+def test_epic_model_defaults():
+    from effortless_mcp.models.epic import Epic
+    epic = Epic(id="EPIC-CORE", title="Core")
+    assert epic.zone is None
+    assert epic.status == "Open"
+
+
+def test_story_model_defaults():
+    from effortless_mcp.models.story import Story
+    story = Story(id="STO-1", epic_id="EPIC-CORE", title="x")
+    assert story.opale_phase == "O-analyse"
+    assert story.status == "Todo"
+    assert story.depends_on == []
+
+
+def test_task_model_has_story_id():
+    from effortless_mcp.models.task import Task
+    task = Task(id="T1", title="x", phase="L-plan")
+    assert task.story_id is None
+
+
+def test_epic_story_round_trip_persistence(tmp_path):
+    from effortless_mcp.server import save_entity, load_entities
+    from effortless_mcp.models.epic import Epic
+    from effortless_mcp.models.story import Story
+
+    epics_dir = os.path.join(str(tmp_path), "epics")
+    stories_dir = os.path.join(str(tmp_path), "stories")
+
+    epic = Epic(id="EPIC-CORE", title="Core")
+    story = Story(id="STO-1", epic_id="EPIC-CORE", title="x")
+
+    save_entity(epics_dir, epic.id, epic.model_dump())
+    save_entity(stories_dir, story.id, story.model_dump())
+
+    loaded_epics = load_entities(epics_dir)
+    loaded_stories = load_entities(stories_dir)
+
+    assert any(e["id"] == "EPIC-CORE" for e in loaded_epics)
+    assert any(s["id"] == "STO-1" for s in loaded_stories)
+
+
+def test_get_paths_exposes_epics_and_stories(tmp_path):
+    from effortless_mcp.server import get_paths
+    paths = get_paths(str(tmp_path))
+    assert "epics" in paths
+    assert "stories" in paths
+    assert paths["epics"].endswith("epics")
+    assert paths["stories"].endswith("stories")
