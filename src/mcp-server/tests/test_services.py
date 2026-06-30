@@ -562,24 +562,25 @@ def test_task_add_stores_and_validates_complexity(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "tasks")
 
         # complexity valide stockée
         msg = server.effortless_task_add("T simple", complexity="simple")
         tsk_id = msg.split("Task ")[1].split(" ")[0]
-        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
+        with open(os.path.join(tasks_dir, f"{tsk_id}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] == "simple"
 
         # absente => None
         msg2 = server.effortless_task_add("T sans")
         tsk_id2 = msg2.split("Task ")[1].split(" ")[0]
-        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id2}.json"), encoding="utf-8") as f:
+        with open(os.path.join(tasks_dir, f"{tsk_id2}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] is None
 
         # valeur invalide rejetée, pas d'écriture
-        before = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
+        before = len(os.listdir(tasks_dir))
         bad = server.effortless_task_add("T bad", complexity="trivial")
         assert "invalid" in bad
-        after = len(os.listdir(os.path.join(tmpdir, ".effortless", "tasks")))
+        after = len(os.listdir(tasks_dir))
         assert before == after
 
 
@@ -588,13 +589,14 @@ def test_task_classify(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "tasks")
         msg = server.effortless_task_add("T")
         tsk_id = msg.split("Task ")[1].split(" ")[0]
 
         # classification réussie
         ok = server.effortless_task_classify(tsk_id, "complex")
         assert tsk_id in ok and "complex" in ok
-        with open(os.path.join(tmpdir, ".effortless", "tasks", f"{tsk_id}.json"), encoding="utf-8") as f:
+        with open(os.path.join(tasks_dir, f"{tsk_id}.json"), encoding="utf-8") as f:
             assert json.load(f)["complexity"] == "complex"
 
         # valeur invalide
@@ -610,7 +612,7 @@ def test_loop_plan_delegation_branches(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
-        tasks_dir = os.path.join(tmpdir, ".effortless", "tasks")
+        tasks_dir = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-01", "tasks")
 
         def add(title, complexity=None):
             msg = server.effortless_task_add(title, complexity=complexity)
@@ -909,6 +911,19 @@ def test_effortless_migrate_state_tool(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
+
+        # effortless_init est désormais fractal-native (L-31). Pour exercer l'outil de
+        # migration legacy -> fractal, on ramène le projet à un état plat pré-fractal :
+        # suppression de l'arbre epics/ scaffoldé et retrait des pointeurs d'état.
+        import shutil
+        shutil.rmtree(os.path.join(tmpdir, ".effortless", "epics"))
+        state_path = os.path.join(tmpdir, ".effortless", "state.json")
+        with open(state_path, encoding="utf-8") as f:
+            _st = json.load(f)
+        _st.pop("active_epic_id", None)
+        _st.pop("active_story_id", None)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(_st, f, indent=2, ensure_ascii=False)
 
         epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "epic.json")
         story_file = os.path.join(

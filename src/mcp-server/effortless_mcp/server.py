@@ -307,10 +307,32 @@ def effortless_init(
     # Création du dossier .effortless
     os.makedirs(paths["storage"], exist_ok=True)
 
-    # Initialisation de state.json
+    # Scaffolding fractal par défaut (L-31) : Epic + Story racine pour que le projet
+    # fraîchement initialisé résolve sa phase via la Story active dès le départ.
+    first_phase_id = config.workflow.phases[0].id
+    epic = {
+        "id": "EPIC-PROJET",
+        "zone": "PROJET",
+        "title": "Cadrage & pilotage du projet",
+        "description": "Epic racine du projet (modèle fractal).",
+        "status": "Open",
+        "stories": ["STO-PROJET-01"],
+    }
+    story = {
+        "id": "STO-PROJET-01",
+        "epic_id": "EPIC-PROJET",
+        "zone": "PROJET",
+        "title": "Story par défaut — progression du projet",
+        "opale_phase": first_phase_id,
+        "status": "Doing",
+    }
+
+    # Initialisation de state.json (avec pointeurs vers la Story active fractale)
     state = ProjectState(
         project_name=name,
         current_phase="O-analyse",
+        active_epic_id="EPIC-PROJET",
+        active_story_id="STO-PROJET-01",
         started_at=_utc_now_iso()
     )
     with open(paths["state"], "w", encoding="utf-8") as f:
@@ -319,6 +341,17 @@ def effortless_init(
     # Initialisation des répertoires d'entités
     for key in ["decisions", "questions", "tasks"]:
         os.makedirs(paths[key], exist_ok=True)
+
+    # Création de l'arbre fractal nested epics/<EPIC>/stories/<STORY>/{tasks,decisions,questions}
+    epic_dir = get_epic_dir(root, "EPIC-PROJET")
+    story_paths = get_story_paths(root, "EPIC-PROJET", "STO-PROJET-01")
+    os.makedirs(epic_dir, exist_ok=True)
+    for key in ["tasks", "decisions", "questions"]:
+        os.makedirs(story_paths[key], exist_ok=True)
+    with open(os.path.join(epic_dir, "epic.json"), "w", encoding="utf-8") as f:
+        json.dump(epic, f, indent=2, ensure_ascii=False)
+    with open(story_paths["story"], "w", encoding="utf-8") as f:
+        json.dump(story, f, indent=2, ensure_ascii=False)
 
     # Création du dossier de documents
     os.makedirs(os.path.join(root, "cadrage", "Phase-001"), exist_ok=True)
@@ -838,13 +871,21 @@ def effortless_task_classify(
     if complexity not in ("simple", "complex"):
         return f"Error: invalid complexity '{complexity}'. Allowed values: simple, complex."
 
-    tasks = load_entities(paths["tasks"])
+    # Modèle fractal : la tâche vit dans le sous-registre tasks/ de la Story active si
+    # présente ; sinon, registre global historique (cohérent avec effortless_task_add).
+    active_story = get_active_story(root)
+    if active_story is not None:
+        tasks_dir = get_story_paths(root, active_story["epic_id"], active_story["id"])["tasks"]
+    else:
+        tasks_dir = paths["tasks"]
+
+    tasks = load_entities(tasks_dir)
     target = next((t for t in tasks if t["id"] == task_id), None)
     if not target:
         return f"Error: Task '{task_id}' not found."
 
     target["complexity"] = complexity
-    save_entity(paths["tasks"], task_id, target)
+    save_entity(tasks_dir, task_id, target)
 
     return f"Task '{task_id}' classified as '{complexity}'."
 

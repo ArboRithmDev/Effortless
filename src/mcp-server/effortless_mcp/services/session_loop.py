@@ -40,7 +40,7 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
     """
     Évalue et fait avancer la machine à états de la boucle itérative d'Effortless.
     """
-    from effortless_mcp.server import load_entities, save_entity
+    from effortless_mcp.server import load_entities, save_entity, get_active_story, get_story_paths
 
     loop_file = os.path.join(repo_path, ".effortless", "loop_state.json")
     if not os.path.exists(loop_file):
@@ -56,7 +56,13 @@ def step_autonomous_loop(repo_path: str, test_command: str) -> str:
             "Reset the loop with effortless_loop_init."
         )
 
-    tasks_dir = os.path.join(repo_path, ".effortless", "tasks")
+    # Modèle fractal : la boucle opère sur le backlog de la Story active si présente ;
+    # sinon, registre global historique (cohérent avec effortless_task_add/classify).
+    active_story = get_active_story(repo_path)
+    if active_story is not None:
+        tasks_dir = get_story_paths(repo_path, active_story["epic_id"], active_story["id"])["tasks"]
+    else:
+        tasks_dir = os.path.join(repo_path, ".effortless", "tasks")
     tasks = load_entities(tasks_dir)
 
     step = loop_state.get("step", "Plan")
