@@ -1486,3 +1486,142 @@ def test_story_start_validates_phase_and_epic(monkeypatch):
         server.effortless_story_start("non active", activate=False)
         with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
             assert json.load(f)["active_story_id"] == "STO-PROJET-01"
+
+
+# --- Adapter Jira concret + scaffolder (STO-TRACKER-02) -----------------------
+
+def _jira_tracker(project_key="EFL"):
+    from effortless_mcp.ports.adapters.jira_client import FakeJiraClient
+    from effortless_mcp.ports.adapters.jira import JiraTracker
+    client = FakeJiraClient()
+    return JiraTracker(client, project_key), client
+
+
+def test_jira_discover_taxonomy_maps_types_and_transitions():
+    from effortless_mcp.ports import ProjectRef
+    tracker, _ = _jira_tracker()
+    tax = tracker.discover_taxonomy(ProjectRef("EFL", "https://jira.test/browse/EFL"))
+    # Niveaux -> ids de type (task ↦ Sous-tâche, DEC-01).
+    assert tax.issue_types == {"epic": "10000", "story": "10007", "task": "10095"}
+    # Statuts locaux -> transitionId du cycle en V (DEC-08).
+    assert tax.transitions == {"Todo": "2", "Doing": "5", "Done": "9"}
+
+
+def test_jira_create_resolves_type_parent_and_labels():
+    from effortless_mcp.ports import ObjectPayload, TrackerRef
+    tracker, client = _jira_tracker()
+    epic = tracker.create(ObjectPayload(level="epic", title="[PROJET]", labels=["effortless-scaffold:PROJET"]))
+    assert epic.tracker_id == "EFL-1" and epic.tracker_url.endswith("/browse/EFL-1")
+    # Type résolu, label posé.
+    assert client.issues["EFL-1"]["issue_type_id"] == "10000"
+    assert client.issues["EFL-1"]["labels"] == ["effortless-scaffold:PROJET"]
+    # Sous-tâche câblée au parent.
+    sub = tracker.create(ObjectPayload(level="task", title="[PROJET] Doc", parent_ref=epic))
+    assert client.issues[sub.tracker_id]["issue_type_id"] == "10095"
+    assert client.issues[sub.tracker_id]["parent_key"] == "EFL-1"
+    # Aucun assignee (DEC-07).
+    assert client.issues["EFL-1"]["assignee"] is None
+
+
+def test_scaffolder_builds_project_tree():
+    from effortless_mcp.ports import ProjectRef
+    from effortless_mcp.services.scaffolder import scaffold_project_from_template
+    from effortless_mcp.templates import load_scaffold_template
+    tracker, client = _jira_tracker()
+
+    class _MemState:
+        def __init__(self): self.d = {}
+        def has(self, z): return z in self.d
+        def get(self, z): return self.d.get(z)
+        def set(self, z, r): self.d[z] = r
+
+    state = _MemState()
+    tmpl = load_scaffold_template()
+    refs = scaffold_project_from_template(tracker, ProjectRef("EFL", "u"), tmpl, "PROJET", state)
+    # 6 nœuds : 1 Epic + 3 Stories + 2 sous-tâches.
+    assert len(refs) == 6
+    assert len(client.issues) == 6
+    # Label sur la racine seulement.
+    roots = [i for i in client.issues.values() if i["labels"]]
+    assert len(roots) == 1 and roots[0]["summary"] == "[PROJET]"
+    # Les 2 sous-tâches pointent vers la Story "Divers".
+    divers = next(k for k, v in refs.items() if v and "Divers" in k)
+    divers_key = refs[divers]["tracker_id"]
+    subs = [i for i in client.issues.values() if i["issue_type_id"] == "10095"]
+    assert len(subs) == 2 and all(s["parent_key"] == divers_key for s in subs)
+
+
+def test_scaffolder_is_idempotent():
+    from effortless_mcp.ports import ProjectRef
+    from effortless_mcp.services.scaffolder import scaffold_project_from_template
+    from effortless_mcp.templates import load_scaffold_template
+    tracker, client = _jira_tracker()
+
+    class _MemState:
+        def __init__(self): self.d = {}
+        def has(self, z): return z in self.d
+        def get(self, z): return self.d.get(z)
+        def set(self, z, r): self.d[z] = r
+
+    state, tmpl = _MemState(), load_scaffold_template()
+    first = scaffold_project_from_template(tracker, ProjectRef("EFL", "u"), tmpl, "PROJET", state)
+    count_after_first = len(client.issues)
+    second = scaffold_project_from_template(tracker, ProjectRef("EFL", "u"), tmpl, "PROJET", state)
+    # Re-run : aucune création supplémentaire, refs identiques.
+    assert len(client.issues) == count_after_first == 6
+    assert second == first
+
+
+def test_resolve_tracker_jira_factory_builds_jira_tracker(monkeypatch):
+    from effortless_mcp.ports import register_adapter, resolve_tracker
+    from effortless_mcp.ports.adapters.jira import JiraTracker
+    from effortless_mcp.ports.adapters.jira_client import FakeJiraClient
+    # Override hermétique de la fabrique « jira » (la réelle exige des creds).
+    register_adapter("jira", lambda cfg: JiraTracker(FakeJiraClient(), cfg.get("project_id", "EFL")))
+    tracker = resolve_tracker({"tracker": {"type": "jira", "project_id": "EFL"}})
+    assert isinstance(tracker, JiraTracker)
+
+
+def test_scaffold_state_persists_and_guards(tmp_path):
+    from effortless_mcp.services.scaffold_state import ScaffoldState
+    st = ScaffoldState(str(tmp_path))
+    assert not st.has("PROJET")
+    st.set("PROJET", {"[PROJET]": {"tracker_id": "EFL-1", "tracker_url": "u"}})
+    assert st.has("PROJET")
+    assert st.get("PROJET")["[PROJET]"]["tracker_id"] == "EFL-1"
+    # Persistance relue par une nouvelle instance.
+    assert ScaffoldState(str(tmp_path)).has("PROJET")
+
+
+def test_tracker_mcp_tools_couple_and_scaffold(monkeypatch):
+    from effortless_mcp import server
+    from effortless_mcp.ports import register_adapter
+    from effortless_mcp.ports.adapters.jira import JiraTracker
+    from effortless_mcp.ports.adapters.jira_client import FakeJiraClient
+    register_adapter("jira", lambda cfg: JiraTracker(FakeJiraClient(), cfg.get("project_id", "EFL")))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+
+        couple = server.effortless_tracker_couple("jira", "EFL", "https://jira.test/browse/EFL")
+        assert "coupled to jira" in couple and "Taxonomy resolved" in couple
+
+        out = server.effortless_tracker_scaffold("PROJET")
+        assert "6 nœud" in out
+        # Re-run idempotent : toujours 6 nœuds, aucune création neuve.
+        out2 = server.effortless_tracker_scaffold("PROJET")
+        assert "6 nœud" in out2
+
+
+def test_tracker_scaffold_uncoupled_is_noop():
+    from effortless_mcp import server
+    import tempfile as _tmp
+    with _tmp.TemporaryDirectory() as tmpdir:
+        os.environ["EFFORTLESS_PROJECT_ROOT"] = tmpdir
+        try:
+            server.effortless_init("P", "d")
+            # Non couplé -> NullTracker : refs no-op (tracker_id vide).
+            out = server.effortless_tracker_scaffold("PROJET")
+            assert "no-op" in out
+        finally:
+            del os.environ["EFFORTLESS_PROJECT_ROOT"]
