@@ -912,6 +912,11 @@ def test_effortless_migrate_state_tool(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
 
+        # init scaffolde le cadrage story-scopé (identique à la sortie du migrateur).
+        assert os.path.exists(os.path.join(
+            tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-01", "00-FNC-GLO-glossaire.md"
+        ))
+
         # effortless_init est désormais fractal-native (L-31). Pour exercer l'outil de
         # migration legacy -> fractal, on ramène le projet à un état plat pré-fractal :
         # suppression de l'arbre epics/ scaffoldé et retrait des pointeurs d'état.

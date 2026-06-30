@@ -238,7 +238,11 @@ def effortless_init(
 
     # Nom de projet par défaut
     name = project_name or os.path.basename(os.path.abspath(root))
-    
+
+    # Racine documentaire story-scopée (alignée sur ce que produit le migrateur
+    # d'état) : un projet fraîchement initialisé a la même forme qu'un projet migré.
+    docs_root = "cadrage/EPIC-PROJET/STO-PROJET-01"
+
     # Configuration par défaut (OPAL)
     config = EffortlessConfig(
         project=ProjectMeta(name=name, description=description, version="0.1.0"),
@@ -249,9 +253,9 @@ def effortless_init(
                     name="Observer",
                     description="Analyse de l'existant, glossaire métier et cartographie technique",
                     required_documents=[
-                        "cadrage/Phase-001/00-FNC-GLO-glossaire.md",
-                        "cadrage/Phase-001/01-TEC-ANA-analyse.md",
-                        "cadrage/Phase-001/02-BQO-questions.md"
+                        f"{docs_root}/00-FNC-GLO-glossaire.md",
+                        f"{docs_root}/01-TEC-ANA-analyse.md",
+                        f"{docs_root}/02-BQO-questions.md"
                     ]
                 ),
                 PhaseConfig(
@@ -259,8 +263,8 @@ def effortless_init(
                     name="Positionner",
                     description="Cadrage décisionnel et architecture cible",
                     required_documents=[
-                        "cadrage/Phase-001/03-TEC-ARC-architecture-cible.md",
-                        "cadrage/Phase-001/04-MET-DEC-registre-decisions.md"
+                        f"{docs_root}/03-TEC-ARC-architecture-cible.md",
+                        f"{docs_root}/04-MET-DEC-registre-decisions.md"
                     ]
                 ),
                 PhaseConfig(
@@ -268,8 +272,8 @@ def effortless_init(
                     name="Articuler",
                     description="Spécifications fonctionnelles et techniques détaillées",
                     required_documents=[
-                        "cadrage/Phase-001/05-FNC-SPE-specifications.md",
-                        "cadrage/Phase-001/06-TEC-API-contrat-api.md"
+                        f"{docs_root}/05-FNC-SPE-specifications.md",
+                        f"{docs_root}/06-TEC-API-contrat-api.md"
                     ]
                 ),
                 PhaseConfig(
@@ -277,14 +281,14 @@ def effortless_init(
                     name="Lancer",
                     description="Plan d'implémentation et découpage en tâches",
                     required_documents=[
-                        "cadrage/Phase-001/07-MET-PLN-plan-action.md"
+                        f"{docs_root}/07-MET-PLN-plan-action.md"
                     ]
                 )
             ]
         ),
         settings=SettingsConfig(
             storage_dir=".effortless",
-            documents_dir="cadrage/Phase-001"
+            documents_dir=docs_root
         )
     )
 
@@ -340,11 +344,12 @@ def effortless_init(
     with open(story_paths["story"], "w", encoding="utf-8") as f:
         json.dump(story, f, indent=2, ensure_ascii=False)
 
-    # Création du dossier de documents
-    os.makedirs(os.path.join(root, "cadrage", "Phase-001"), exist_ok=True)
+    # Création du dossier de documents (story-scopé)
+    docs_dir = os.path.join(root, "cadrage", "EPIC-PROJET", "STO-PROJET-01")
+    os.makedirs(docs_dir, exist_ok=True)
 
     # Création d'un template de glossaire par défaut pour démarrer
-    glossary_path = os.path.join(root, "cadrage", "Phase-001", "00-FNC-GLO-glossaire.md")
+    glossary_path = os.path.join(docs_dir, "00-FNC-GLO-glossaire.md")
     if not os.path.exists(glossary_path):
         with open(glossary_path, "w", encoding="utf-8") as f:
             f.write("---\nphase: O-analyse\nstatut: Active\n---\n\n# 📓 Domain Glossary\n\nDefine your domain terms here.\n")
