@@ -48,7 +48,7 @@ def tracker_project_ref(root: str) -> Optional[ProjectRef]:
 
 def is_coupled(root: str) -> bool:
     """Vrai si un adapter concret est résolu (≠ NullTracker)."""
-    return not isinstance(resolve_tracker(_read_settings(root)), NullTracker)
+    return not isinstance(resolve_tracker(_read_settings(root), root), NullTracker)
 
 
 def couple_project(
@@ -87,7 +87,7 @@ def project_task_created(root: str, task: dict) -> dict:
     """Projette la création d'une Task. Persiste tracker_id/url sur l'objet, ou
     consigne une migration si le tracker est injoignable. Best-effort : n'échoue
     jamais l'opération locale. Retourne le task (éventuellement enrichi)."""
-    tracker = resolve_tracker(_read_settings(root))
+    tracker = resolve_tracker(_read_settings(root), root)
     if isinstance(tracker, NullTracker):
         return task  # non couplé : no-op, zéro I/O
     payload = ObjectPayload(
@@ -109,7 +109,7 @@ def project_task_created(root: str, task: dict) -> dict:
 
 def project_task_transitioned(root: str, task: dict, status: str) -> None:
     """Projette un changement de statut. Tracker injoignable → migration outbox."""
-    tracker = resolve_tracker(_read_settings(root))
+    tracker = resolve_tracker(_read_settings(root), root)
     if isinstance(tracker, NullTracker):
         return  # non couplé : no-op, zéro I/O
     ref = TrackerRef(task.get("tracker_id", ""), task.get("tracker_url", ""))

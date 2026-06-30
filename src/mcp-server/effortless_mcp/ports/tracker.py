@@ -116,13 +116,16 @@ def register_adapter(type_name: str, factory: Callable[[dict], Tracker]) -> None
     _ADAPTERS[type_name] = factory
 
 
-def resolve_tracker(settings: Optional[dict]) -> Tracker:
+def resolve_tracker(settings: Optional[dict], root: Optional[str] = None) -> Tracker:
     """Résout l'adapter depuis `settings['tracker']['type']`.
 
     Type absent, vide ou inconnu → `NullTracker` (no-op sûr). Quand un adapter
     concret est enregistré pour ce type, sa fabrique est appelée avec la config
-    tracker."""
+    tracker. `root` (STO-TRACKER-03) est injecté dans la cfg sous `__root__` pour
+    que les adaptateurs médiés (outbox) sachent où écrire le SyncJournal."""
     cfg = (settings or {}).get("tracker") or {}
+    if root is not None:
+        cfg = {**cfg, "__root__": root}
     factory = _ADAPTERS.get(cfg.get("type") or "")
     if factory is None:
         return NullTracker()

@@ -170,7 +170,9 @@ def build_queue_tracker(cfg: dict) -> QueueTracker:
     """Fabrique du type « jira » en mode médié. Le SyncJournal écrit sous la racine
     projet injectée dans la cfg (`__root__`)."""
     from effortless_mcp.ports.sync_journal import SyncJournal
-    return QueueTracker(SyncJournal(cfg["__root__"]))
+    # `__root__` injecté par resolve_tracker(..., root). Fallback défensif (cwd) pour
+    # les usages où seule la résolution de type importe (ex. is_coupled).
+    return QueueTracker(SyncJournal(cfg.get("__root__") or "."))
 
 
 # Mode médié = défaut pour « jira » (override de l'enregistrement REST ci-dessus ;
