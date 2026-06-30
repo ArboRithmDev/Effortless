@@ -1,0 +1,19 @@
+{
+  "zone_prefix": "PROJET",
+  "root": {
+    "level": "epic",
+    "title": "[PROJET]",
+    "children": [
+      { "level": "story", "title": "[PROJET] Pilotage" },
+      { "level": "story", "title": "[PROJET] Analyse et spécifications détaillées" },
+      {
+        "level": "story",
+        "title": "[PROJET] Divers (Initialisation, déploiement, documentation)",
+        "children": [
+          { "level": "task", "title": "[PROJET] Déploiement" },
+          { "level": "task", "title": "[PROJET] Documentation" }
+        ]
+      }
+    ]
+  }
+}
