@@ -6,6 +6,7 @@ fabrique `resolve_tracker`. Aucune implémentation concrète ici (DEC-06).
 """
 
 from effortless_mcp.ports.tracker import (
+    ROVO_DISCLAIMER,
     Level,
     LocalStatus,
     TrackerRef,
@@ -26,6 +27,7 @@ from effortless_mcp.ports.sync_journal import SyncJournal
 from effortless_mcp.ports.adapters import jira as _jira_adapter  # noqa: F401,E402
 
 __all__ = [
+    "ROVO_DISCLAIMER",
     "Level",
     "LocalStatus",
     "TrackerRef",

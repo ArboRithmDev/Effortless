@@ -14,6 +14,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Literal, Optional, Protocol, runtime_checkable
 
+# Disclaimer affiché en tête des outils tracker en mode médié (STO-TRACKER-03) :
+# le flush Jira passe par le connecteur Rovo MCP, disponible côté agent uniquement.
+ROVO_DISCLAIMER = (
+    "⚠️ Projection médiée : nécessite le connecteur Atlassian Rovo MCP déclaré "
+    "dans ta CLI/App. Absent ? Ajoute-le — sinon l'exécution Jira (flush) est impossible."
+)
+
 # Les 4 niveaux canoniques (DEC-01). « task » ↦ Sub-Task ; « story » ↦ Story|Task niv.3.
 Level = Literal["project", "epic", "story", "task"]
 LocalStatus = Literal["Todo", "Doing", "Done"]
