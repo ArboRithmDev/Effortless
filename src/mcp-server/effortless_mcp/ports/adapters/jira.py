@@ -17,6 +17,7 @@ from effortless_mcp.ports.tracker import (
     ProjectRef,
     Taxonomy,
     TrackerRef,
+    register_adapter,
 )
 
 # Statut local -> id de statut Jira cible (cycle en V observé sur IFX/EFL).
@@ -94,3 +95,17 @@ class JiraTracker:
 
     def import_tree(self, project: ProjectRef) -> List[ImportedObject]:
         return []
+
+
+def build_jira_tracker(cfg: dict) -> JiraTracker:
+    """Fabrique enregistrée pour le type « jira ». Construit le client REST réel
+    (import paresseux : il porte les dépendances/credentials, inutiles tant que le
+    projet n'est pas couplé en Jira). Les tests réenregistrent leur propre fabrique
+    avec un FakeJiraClient."""
+    from effortless_mcp.ports.adapters.jira_client import JiraClient
+    client = JiraClient(cfg["base_url"], cfg["email"], cfg["api_token"])
+    return JiraTracker(client, cfg["project_id"])
+
+
+# Effet de bord d'import : rend le type « jira » résoluble par resolve_tracker.
+register_adapter("jira", build_jira_tracker)
