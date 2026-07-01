@@ -1752,6 +1752,72 @@ def effortless_tracker_xray_add_test(title: str, link_tracker_id: str = "", test
     )
 
 
+def _iter_task_files(root: str):
+    """Itère tous les fichiers TSK-*.json : registre global plat + tous les
+    sous-registres story-scopés (epics/<E>/stories/<S>/tasks/). Yield chaque
+    (chemin, task_dict)."""
+    paths = get_paths(root)
+    dirs = [paths["tasks"]]
+    epics_dir = paths["epics"]
+    if os.path.isdir(epics_dir):
+        for epic in os.listdir(epics_dir):
+            stories = os.path.join(epics_dir, epic, "stories")
+            if not os.path.isdir(stories):
+                continue
+            for story in os.listdir(stories):
+                dirs.append(os.path.join(stories, story, "tasks"))
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".json"):
+                continue
+            fp = os.path.join(d, name)
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    yield fp, json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+
+@mcp.tool()
+def effortless_tracker_reconcile_tasks(refs_json: str) -> str:
+    """
+    Réécrit le tracker_id/url des tâches locales depuis la map de refs de l'agent.
+
+    Ferme le gap d'ordering (STO-TRACKER-09) : une tâche créée médié porte un
+    placeholder `local:N` tant que son op create n'est pas flushée+réconciliée. Après
+    que l'agent a créé les issues via Rovo, `refs_json` = `{"local:N": {"tracker_id":
+    "EFL-…", "tracker_url": "…"}}` permet de rebrancher chaque tâche sur sa vraie clé
+    Jira — transition/log_work médiés ciblent alors la clé réelle. Idempotent : une
+    tâche déjà sur une clé réelle (hors map) est ignorée. Appeler flush_ack ensuite.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    try:
+        refs = json.loads(refs_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        return f"Error: refs_json invalide ({e})."
+    if not isinstance(refs, dict) or not all(
+        isinstance(v, dict) and v.get("tracker_id") for v in refs.values()
+    ):
+        return "Error: refs_json doit être {local_id: {tracker_id, tracker_url}}."
+
+    reconciled = 0
+    for fp, task in _iter_task_files(root):
+        ref = refs.get(task.get("tracker_id"))
+        if not ref:
+            continue
+        task["tracker_id"] = ref["tracker_id"]
+        task["tracker_url"] = ref.get("tracker_url", "")
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(task, f, indent=2, ensure_ascii=False)
+        reconciled += 1
+    return f"Reconcile tâches : {reconciled} tâche(s) rebranchée(s) sur leur clé Jira réelle."
+
+
 @mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """

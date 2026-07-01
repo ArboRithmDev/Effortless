@@ -43,15 +43,16 @@ class QueueTracker:
         # transitions: {statut local -> id transition Jira} (persisté dans settings.tracker.transitions).
         # Vide tant que le discover transitions n'a pas été acké → transition_id=None (fallback agent).
         self._transitions = transitions or {}
-        self._seq = 0
 
     def discover_taxonomy(self, project: ProjectRef) -> Taxonomy:
         # Médié agent : la taxonomie est fournie via ack si nécessaire. Vide ici.
         return Taxonomy()
 
     def create(self, payload: ObjectPayload) -> TrackerRef:
-        self._seq += 1
-        local_id = f"local:{self._seq}"
+        # Id local dérivé du seq outbox (globalement unique across instances) : deux
+        # task_add successifs obtiennent local:1 puis local:2, jamais une collision qui
+        # rendrait le reconcile ambigu (STO-TRACKER-09).
+        local_id = f"local:{self._journal.next_seq()}"
         parent_local = payload.parent_ref.tracker_id if payload.parent_ref else None
         self._journal.enqueue("create", {
             "local_id": local_id,

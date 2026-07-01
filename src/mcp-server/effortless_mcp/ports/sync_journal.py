@@ -46,6 +46,13 @@ class SyncJournal:
         return [e for e in self._load_all() if not e.get("played")]
 
     # --- écriture --------------------------------------------------------
+    def next_seq(self) -> int:
+        """Prochain `seq` qui sera attribué par `enqueue` (max existant + 1).
+
+        Sert à dériver un id local globalement unique AVANT l'enqueue (le seq outbox
+        est unique across instances, contrairement à un compteur d'instance)."""
+        return max((e.get("seq", 0) for e in self._load_all()), default=0) + 1
+
     def _path(self, seq: int) -> str:
         return os.path.join(self.dir, f"{seq:06d}.json")
 

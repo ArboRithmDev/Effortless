@@ -2014,3 +2014,75 @@ def test_xray_add_test_guards(monkeypatch):
         assert "no-op" in server.effortless_tracker_xray_add_test("T")
         server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
         assert "title requis" in server.effortless_tracker_xray_add_test("  ")
+
+
+# --- Reconcile task registry (local:N → clé réelle) — STO-TRACKER-09 ----------
+
+def test_reconcile_tasks_rewrites_local_to_real(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        # task_add via projection médiée -> tracker_id = local:N.
+        server.effortless_task_add("Tâche témoin")
+        # Récupère le local id posé sur la tâche.
+        tasks_dir = server.resolve_registry_dir(tmpdir, "tasks")
+        task = next(t for t in server.load_entities(tasks_dir) if t["id"] == "TSK-01")
+        local_id = task["tracker_id"]
+        assert local_id.startswith("local:")
+
+        refs = {local_id: {"tracker_id": "EFL-42", "tracker_url": "u/EFL-42"}}
+        out = server.effortless_tracker_reconcile_tasks(json.dumps(refs))
+        assert "1 tâche" in out
+        task2 = next(t for t in server.load_entities(tasks_dir) if t["id"] == "TSK-01")
+        assert task2["tracker_id"] == "EFL-42" and task2["tracker_url"] == "u/EFL-42"
+
+
+def test_reconcile_tasks_idempotent_and_scoped(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_task_add("T")
+        tasks_dir = server.resolve_registry_dir(tmpdir, "tasks")
+        local_id = next(t for t in server.load_entities(tasks_dir) if t["id"] == "TSK-01")["tracker_id"]
+        server.effortless_tracker_reconcile_tasks(json.dumps({local_id: {"tracker_id": "EFL-1", "tracker_url": "u"}}))
+        # 2e run avec le même local id : déjà réel, plus de match -> 0.
+        out2 = server.effortless_tracker_reconcile_tasks(json.dumps({local_id: {"tracker_id": "EFL-1", "tracker_url": "u"}}))
+        assert "0 tâche" in out2
+
+
+def test_reconcile_tasks_walks_multiple_stories(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_task_add("T story1")  # STO-PROJET-01 active
+        # Nouvelle story sous le même Epic actif, task_add dedans.
+        server.effortless_story_start("Deuxième story")
+        server.effortless_task_add("T story2")
+
+        # Collecte les 2 local ids (registres story distincts) — désormais UNIQUES
+        # (local:1 / local:2) grâce au seq outbox global.
+        local_ids = {task["tracker_id"] for _, task in server._iter_task_files(tmpdir)
+                     if str(task.get("tracker_id", "")).startswith("local:")}
+        assert len(local_ids) == 2  # pas de collision cross-instance
+        refs = {lid: {"tracker_id": f"EFL-{i}", "tracker_url": f"u/{i}"} for i, lid in enumerate(local_ids, 1)}
+        out = server.effortless_tracker_reconcile_tasks(json.dumps(refs))
+        # Les deux tâches (2 stories) rebranchées via le walk multi-registres.
+        assert "2 tâche" in out
+        remaining = [t for _, t in server._iter_task_files(tmpdir)
+                     if str(t.get("tracker_id", "")).startswith("local:")]
+        assert remaining == []
+
+
+def test_reconcile_tasks_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_reconcile_tasks("{bad")
+        assert "local_id" in server.effortless_tracker_reconcile_tasks('{"local:1": {"x": 1}}')
