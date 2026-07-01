@@ -22,6 +22,7 @@ tags:
 | 002-Epic-Tracker | Tracker | Done | 12/12 | Projection médiée Jira : scaffold, transition, temps passé, import read-mostly, Xray, réconciliation, hygiène outbox, idempotence. |
 | 003-Epic-Cadrage | Cadrage | Done | 6/6 | Cadrage projet (documents 0-4), deux modes d'initialisation, nomenclature des répertoires, outils de clôture Story/Epic. |
 | 004-Epic-Process | Process | Done | 3/3 | Durcissement du process (anti-dérive, dispatch évolutions, rendu dérivé, validation) |
-| 005-Epic-Obsidian | Obsidian | Open | 0/1 | Config Obsidian embarquée |
+| 005-Epic-Obsidian | Obsidian | Done | 2/2 | Config Obsidian embarquée |
 | 006-Epic-Webui | Webui | Open | — | Web-UI suivi augmenté |
 | 007-Epic-Nomenclature | Nomenclature | Done | 1/1 | Slug de Story dérivé du titre |
+| 008-Epic-Graphe | Graphe | Open | 1/1 | Vue graphe et titres frontmatter |

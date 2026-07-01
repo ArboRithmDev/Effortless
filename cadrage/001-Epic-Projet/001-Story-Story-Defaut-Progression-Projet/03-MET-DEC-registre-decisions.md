@@ -1,4 +1,5 @@
 ---
+titre: Registre decisions
 phase: L-plan
 statut: En cours
 type: cadrage-story

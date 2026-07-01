@@ -1,4 +1,5 @@
 ---
+titre: Architecture cible
 phase: P-cadrage
 statut: En cours
 type: cadrage-story

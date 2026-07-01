@@ -1,4 +1,5 @@
 ---
+titre: Glossaire
 phase: O-analyse
 statut: Validé
 type: cadrage-story

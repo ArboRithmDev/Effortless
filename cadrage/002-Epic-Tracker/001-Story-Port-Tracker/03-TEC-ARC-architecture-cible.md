@@ -1,4 +1,5 @@
 ---
+titre: Architecture cible
 phase: P-cadrage
 statut: Validé
 type: cadrage-story

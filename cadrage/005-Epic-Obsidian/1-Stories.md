@@ -15,4 +15,5 @@ tags:
 
 | Seq | Id | Titre | Statut |
 |---|---|---|---|
-| 1 | 001-Story-Dashboards-Suivi-Cadrage | Dashboards de suivi du cadrage (Bases et Dataview) | Doing |
+| 1 | 001-Story-Dashboards-Suivi-Cadrage | Dashboards de suivi du cadrage (Bases et Dataview) | Done |
+| 2 | 002-Story-Embed-Config-Obsidian-Dashboards | Embed config Obsidian et dashboards dans le scaffold init | Done |

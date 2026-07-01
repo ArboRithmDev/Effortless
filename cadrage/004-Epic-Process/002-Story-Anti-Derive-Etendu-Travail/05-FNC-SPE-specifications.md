@@ -1,4 +1,5 @@
 ---
+titre: Specifications
 phase: A-specs
 statut: Rédigé
 type: cadrage-story

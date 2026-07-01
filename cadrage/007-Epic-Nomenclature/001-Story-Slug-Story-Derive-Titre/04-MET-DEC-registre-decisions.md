@@ -1,4 +1,5 @@
 ---
+titre: Registre decisions
 phase: P-cadrage
 statut: À rédiger
 type: cadrage-story

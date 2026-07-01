@@ -1,4 +1,5 @@
 ---
+titre: Plan action
 phase: L-plan
 statut: En cours
 type: cadrage-story

@@ -1,4 +1,5 @@
 ---
+titre: Registre decisions
 phase: E-execute
 statut: Validé
 type: cadrage-story
