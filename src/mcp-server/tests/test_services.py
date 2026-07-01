@@ -1877,3 +1877,64 @@ def test_tracker_log_work_uncoupled_noop(monkeypatch):
         out = server.effortless_tracker_log_work("TSK-01", 20, "x")
         assert "no-op" in out
         assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+# --- Import read-mostly médié — STO-TRACKER-07 --------------------------------
+
+def test_import_plan_suggests_label_jql(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        out = server.effortless_tracker_import_plan("PROJET")
+        plan = json.loads(out.split("\n\n", 1)[1])
+        assert plan["zone"] == "PROJET"
+        assert 'labels = "effortless-scaffold:PROJET"' in plan["jql"]
+        assert "tree" in plan["ack_shape"]
+
+
+def test_import_ack_reconciles_scaffold_state(monkeypatch):
+    from effortless_mcp import server
+    from effortless_mcp.services.scaffold_state import ScaffoldState
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        tree = {"tree": [
+            {"level": "epic", "tracker_id": "EFL-1", "tracker_url": "u/EFL-1",
+             "title": "[PROJET]", "parent_id": None},
+            {"level": "task", "tracker_id": "EFL-2", "tracker_url": "u/EFL-2",
+             "title": "[PROJET] Doc", "parent_id": "EFL-1"},
+        ]}
+        out = server.effortless_tracker_import_ack("PROJET", json.dumps(tree))
+        assert "2 issue" in out
+        st = ScaffoldState(tmpdir)
+        assert st.has("PROJET")
+        assert st.get("PROJET")["[PROJET]"]["tracker_id"] == "EFL-1"
+
+
+def test_rescaffold_idempotent_after_import(monkeypatch):
+    # Jira-as-truth : après import_ack, un scaffold ne recrée rien (outbox vide).
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        tree = {"tree": [{"level": "epic", "tracker_id": "EFL-1", "tracker_url": "u",
+                          "title": "[PROJET]", "parent_id": None}]}
+        server.effortless_tracker_import_ack("PROJET", json.dumps(tree))
+        out = server.effortless_tracker_scaffold("PROJET")
+        assert "déjà scaffoldée" in out
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_import_ack_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_import_ack("PROJET", "{bad")
+        assert "liste" in server.effortless_tracker_import_ack("PROJET", '{"tree": 5}')
+        # Nœud sans tracker_id rejeté.
+        assert "tracker_id" in server.effortless_tracker_import_ack(
+            "PROJET", '{"tree": [{"title": "x"}]}')

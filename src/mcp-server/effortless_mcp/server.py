@@ -1612,6 +1612,77 @@ def effortless_tracker_log_work(task_id: str, minutes: int, comment: str = "") -
 
 
 @mcp.tool()
+def effortless_tracker_import_plan(zone: str = "PROJET") -> str:
+    """
+    Renvoie le plan d'import read-mostly médié : la JQL que l'agent doit exécuter.
+
+    Import « read-mostly » (STO-TRACKER-07) : Jira est source de vérité, aucune
+    écriture. L'agent joue la JQL via Rovo `searchJiraIssuesUsingJql` (arbre marqué
+    par le label de scaffold), reverse-mappe {level, tracker_id, tracker_url, title,
+    parent_id}, puis appelle effortless_tracker_import_ack(zone, tree_json).
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.ports import ROVO_DISCLAIMER
+    label = f"effortless-scaffold:{zone}"
+    jql = f'labels = "{label}" ORDER BY created ASC'
+    plan = {
+        "zone": zone,
+        "jql": jql,
+        "note": "L'Epic racine porte le label ; suivre parent → enfants pour reconstruire l'arbre.",
+        "ack_shape": {"tree": [{"level": "epic|story|task", "tracker_id": "EFL-1",
+                                "tracker_url": "…", "title": "…", "parent_id": "EFL-… | null"}]},
+    }
+    return f"{ROVO_DISCLAIMER}\n\n{json.dumps(plan, ensure_ascii=False, indent=2)}"
+
+
+@mcp.tool()
+def effortless_tracker_import_ack(zone: str, tree_json: str) -> str:
+    """
+    Reconcile l'arbre distant reverse-mappé par l'agent dans l'état local (Jira-as-truth).
+
+    `tree_json` = JSON `{"tree": [{"level","tracker_id","tracker_url","title","parent_id"}]}`
+    produit par l'agent après la JQL d'import_plan. Peuple ScaffoldState[zone]
+    (`title → {tracker_id, tracker_url}`) pour rendre un futur scaffold idempotent
+    (aucune recréation : la vérité Jira prime). Import read-mostly : aucune écriture Jira.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.ports import ImportedObject, TrackerRef
+    from effortless_mcp.services.scaffold_state import ScaffoldState
+    try:
+        payload = json.loads(tree_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        return f"Error: tree_json invalide ({e})."
+    tree = payload.get("tree") if isinstance(payload, dict) else payload
+    if not isinstance(tree, list):
+        return "Error: tree_json doit contenir une liste 'tree' d'objets d'issues."
+
+    refs: dict = {}
+    imported = []
+    for node in tree:
+        if not isinstance(node, dict):
+            return "Error: chaque nœud doit être un objet {level, tracker_id, title, …}."
+        tid, title = node.get("tracker_id"), node.get("title")
+        if not tid or not title:
+            return "Error: chaque nœud requiert au minimum tracker_id et title."
+        url = node.get("tracker_url", "")
+        refs[title] = {"tracker_id": tid, "tracker_url": url}
+        imported.append(ImportedObject(
+            level=node.get("level", "task"),
+            ref=TrackerRef(tid, url),
+            title=title,
+            parent_id=node.get("parent_id"),
+        ))
+    ScaffoldState(root).set(zone, refs)
+    return f"Import zone '{zone}' réconcilié : {len(imported)} issue(s) (Jira-as-truth). Re-scaffold désormais idempotent."
+
+
+@mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """
     Initialise une session de développement itératif autonome avec un objectif global spécifié.
