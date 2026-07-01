@@ -2340,3 +2340,76 @@ def test_migrate_nomenclature_tool_dry_run_then_apply(monkeypatch, tmp_path):
     out = server.effortless_migrate_nomenclature(confirm=True)
     assert "migrée" in out
     assert os.path.isdir(os.path.join(str(tmp_path), ".effortless", "epics", "001-Epic-Alpha"))
+
+
+# --- Cadrage niveau Epic (charte + registre stories) — 003-Story-Cadrage -------
+
+def _epic_fixture(root, epic_id="002-Epic-Demo", zone="DEMO"):
+    import io
+    def wj(p, d):
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        json.dump(d, io.open(p, "w", encoding="utf-8", newline="\n"), indent=2, ensure_ascii=False)
+    eff = os.path.join(root, ".effortless", "epics", epic_id)
+    wj(os.path.join(eff, "epic.json"),
+       {"id": epic_id, "zone": zone, "seq": 2, "title": "Démo", "status": "Open",
+        "stories": ["001-Story-Demo", "002-Story-Demo"]})
+    wj(os.path.join(eff, "stories", "001-Story-Demo", "story.json"),
+       {"id": "001-Story-Demo", "epic_id": epic_id, "seq": 1, "title": "Première", "status": "Done"})
+    wj(os.path.join(eff, "stories", "002-Story-Demo", "story.json"),
+       {"id": "002-Story-Demo", "epic_id": epic_id, "seq": 2, "title": "Deuxième | avec pipe", "status": "Doing"})
+    return epic_id
+
+
+def test_epic_charter_scaffolded_once_not_overwritten(tmp_path):
+    from effortless_mcp.services.epic_cadrage import write_epic_charter
+    root = str(tmp_path)
+    eid = _epic_fixture(root)
+    assert write_epic_charter(root, eid) is True
+    charter = os.path.join(root, "cadrage", eid, "0-Epic.md")
+    with open(charter, encoding="utf-8") as f:
+        txt = f.read()
+    assert "type: cadrage-epic" in txt and "perimetre: Demo" in txt and "Charte d'Epic" in txt
+    # Édition auteur préservée : re-scaffold ne réécrit pas.
+    with open(charter, "w", encoding="utf-8") as f:
+        f.write(txt + "\nAJOUT AUTEUR\n")
+    assert write_epic_charter(root, eid) is False
+    with open(charter, encoding="utf-8") as f:
+        assert "AJOUT AUTEUR" in f.read()
+
+
+def test_story_registry_is_derived_render(tmp_path):
+    from effortless_mcp.services.epic_cadrage import render_story_registry
+    root = str(tmp_path)
+    eid = _epic_fixture(root)
+    render_story_registry(root, eid)
+    with open(os.path.join(root, "cadrage", eid, "1-Stories.md"), encoding="utf-8") as f:
+        reg = f.read()
+    assert "type: cadrage-epic-registre" in reg
+    assert "| 1 | 001-Story-Demo | Première | Done |" in reg
+    # Pipe échappé, statut Doing reflété.
+    assert "Deuxième \\| avec pipe" in reg and "Doing" in reg
+    # Régénéré : un changement de statut dans story.json se reflète au re-render.
+    sp = os.path.join(root, ".effortless", "epics", eid, "stories", "002-Story-Demo", "story.json")
+    with open(sp, encoding="utf-8") as f:
+        s = json.load(f)
+    s["status"] = "Done"
+    with open(sp, "w", encoding="utf-8") as f:
+        json.dump(s, f, ensure_ascii=False)
+    render_story_registry(root, eid)
+    with open(os.path.join(root, "cadrage", eid, "1-Stories.md"), encoding="utf-8") as f:
+        assert "| 2 | 002-Story-Demo | Deuxième \\| avec pipe | Done |" in f.read()
+
+
+def test_epic_start_scaffolds_epic_cadrage(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    server.effortless_epic_start("PAYROLL", "Paie")
+    eid = _state(str(tmp_path))["active_epic_id"]
+    assert os.path.exists(os.path.join(str(tmp_path), "cadrage", eid, "0-Epic.md"))
+    assert os.path.exists(os.path.join(str(tmp_path), "cadrage", eid, "1-Stories.md"))
+    # Une Story ajoutée apparaît dans le registre régénéré.
+    server.effortless_story_start("Story paie")
+    sid = _state(str(tmp_path))["active_story_id"]
+    with open(os.path.join(str(tmp_path), "cadrage", eid, "1-Stories.md"), encoding="utf-8") as f:
+        assert sid in f.read()

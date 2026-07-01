@@ -487,6 +487,10 @@ def effortless_story_start(
     with open(epic_file, "w", encoding="utf-8") as f:
         json.dump(epic_data, f, indent=2, ensure_ascii=False)
 
+    # Rafraîchit le registre des stories de l'Epic (rendu dérivé).
+    from effortless_mcp.services.epic_cadrage import refresh_epic_cadrage
+    refresh_epic_cadrage(root, target_epic_id, epic_data)
+
     # Bascule de la Story active (modèle fractal : la phase suit la Story active).
     activated_msg = ""
     if activate:
@@ -556,8 +560,10 @@ def effortless_epic_start(zone: str, title: str, description: str = "", activate
     epic["seq"] = seq
     epic["stories"] = []
     save_entity(epic_dir, "epic", epic)
-    # Dossier de cadrage epic-scopé.
+    # Dossier + docs de cadrage epic-scopés (charte 0-Epic + registre 1-Stories).
     os.makedirs(os.path.join(root, "cadrage", epic_id), exist_ok=True)
+    from effortless_mcp.services.epic_cadrage import refresh_epic_cadrage
+    refresh_epic_cadrage(root, epic_id, epic)
 
     activated = ""
     if activate:
@@ -603,6 +609,11 @@ def effortless_story_complete(story_id: Optional[str] = None) -> str:
         return f"Error: story '{sid}' a {len(pending)} tâche(s) non Done : {', '.join(pending)}."
     story["status"] = "Done"
     save_entity(sp["dir"], "story", story)
+    from effortless_mcp.services.epic_cadrage import render_story_registry
+    try:
+        render_story_registry(root, epic_id)
+    except OSError:
+        pass
     return f"Story '{sid}' clôturée (Done)."
 
 
