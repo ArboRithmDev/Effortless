@@ -2,9 +2,11 @@
 
 L'identifiant logique DEVIENT la forme lisible (dir == id) :
   - Epic  : ``<NNN>-Epic-<Périmètre>``   (NNN = séquence de création, globale)
-  - Story : ``<NNN>-Story-<Périmètre>``  (NNN = séquence de création, par Epic)
+  - Story : ``<NNN>-Story-<Sujet>``      (NNN = séquence de création, par Epic)
 
-``<Périmètre>`` = zone en Titlecase (TRACKER -> Tracker). La migration renomme les
+``<Périmètre>`` (Epic) = zone en Titlecase (TRACKER -> Tracker). ``<Sujet>`` (Story) =
+slug Title-hyphen dérivé du *titre* de la Story (EVO-011), lisible dans Obsidian.
+La migration renomme les
 répertoires (``.effortless/epics`` + ``cadrage``) et réécrit toutes les références
 (epic.json id/stories[], story.json id/epic_id, state.active_*, backlog.json,
 frontmatter des docs de cadrage). Idempotente : un arbre déjà migré donne un plan
@@ -18,6 +20,7 @@ import os
 import re
 import shutil
 import time
+import unicodedata
 from typing import Dict, List, Optional
 
 
@@ -49,8 +52,34 @@ def format_epic_id(seq: int, perimetre: str) -> str:
     return f"{seq:03d}-Epic-{perimetre}"
 
 
-def format_story_id(seq: int, perimetre: str) -> str:
-    return f"{seq:03d}-Story-{perimetre}"
+def format_story_id(seq: int, subject: str) -> str:
+    return f"{seq:03d}-Story-{subject}"
+
+
+# Mots vides (fr/en) écartés du slug de sujet — ne portent pas de sens distinctif.
+_STORY_STOPWORDS = {
+    "de", "du", "des", "le", "la", "les", "un", "une", "au", "aux", "a",
+    "en", "et", "ou", "sur", "pour", "dans", "par", "avec", "vers", "est",
+    "the", "of", "to", "for", "and", "or", "l", "d", "in", "on", "with",
+    "via", "as", "vs", "plus",
+}
+
+
+def slugify_subject(title: str, max_words: int = 4) -> str:
+    """Slug Title-hyphen ASCII dérivé du *titre* d'une Story (sujet lisible).
+
+    Ex : « Anti-dérive étendu au travail cadrage (gate) » → « Anti-Derive-Etendu-Travail ».
+    Retire parenthèses et entités HTML (``&lt;``…), translittère les accents (é→e, ç→c),
+    écarte les mots vides et les jetons d'une lettre, garde les ``max_words`` premiers
+    mots significatifs. Repli « Story » si le titre ne donne aucun mot exploitable.
+    """
+    t = re.sub(r"\([^)]*\)", " ", title or "")
+    t = re.sub(r"&[a-zA-Z]+;|&#\d+;", " ", t)  # entités HTML (&lt; &gt; &amp;…)
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("ascii")
+    tokens = re.findall(r"[A-Za-z0-9]+", t)
+    words = [w for w in tokens if len(w) > 1 and w.lower() not in _STORY_STOPWORDS] or tokens
+    slug = "-".join(w.capitalize() for w in words[:max_words])
+    return slug or "Story"
 
 
 def _read_json(path: str) -> dict:
@@ -161,7 +190,10 @@ def plan_nomenclature(root: str) -> dict:
         for j, sname in enumerate(story_dirs, start=1):
             story = _read_json(os.path.join(stories_dir, sname, "story.json"))
             old_sid = story.get("id", sname)
-            new_sid = format_story_id(j, perimetre)
+            # Sujet de la Story dérivé de son titre (pas du périmètre de l'Epic) :
+            # <NNN>-Story-<Sujet> lisible dans Obsidian (EVO-011).
+            subject = slugify_subject(story.get("title", "") or old_sid)
+            new_sid = format_story_id(j, subject)
             story_plan.append({"old_id": old_sid, "new_id": new_sid, "seq": j})
             if old_sid != new_sid:
                 changed = True

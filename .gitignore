@@ -12,7 +12,10 @@ dist/
 # État éphémère de la boucle autonome
 .effortless/loop_state.json
 
-# Dogfooding du framework sur lui-même (hors repo public)
+# Dogfooding du framework sur lui-même.
+# cadrage/ est désormais VERSIONNÉ (anti-dérive P1 : le hook pre-commit doit voir
+# les éditions de cadrage — cause racine de la dérive du 2026-07-01). Seuls l'état
+# runtime, la config projet locale et la config Obsidian personnelle restent ignorés.
 .effortless/
-cadrage/
 effortless.json
+cadrage/.obsidian/

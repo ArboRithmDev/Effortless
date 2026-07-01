@@ -1413,13 +1413,13 @@ def test_story_start_scaffolds_and_activates_new_story(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
 
-        server.effortless_story_start("Deuxième story")
-        # Nouvelle forme : <NNN>-Story-Projet sous l'Epic actif (EPIC-PROJET).
+        server.effortless_story_start("Migration des données")
+        # Forme <NNN>-Story-<Sujet> : le sujet dérive du TITRE (EVO-011).
         with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
             state = json.load(f)
         sid = state["active_story_id"]
         eid = state["active_epic_id"]
-        assert sid.endswith("-Story-Projet") and sid[:3].isdigit()
+        assert sid == "001-Story-Migration-Donnees"
 
         # Arbre fractal scaffoldé : fiche + sous-registres.
         sdir = os.path.join(tmpdir, ".effortless", "epics", eid, "stories", sid)
@@ -2249,14 +2249,16 @@ def _build_nomen_fixture(root):
     wj(os.path.join(eff, "epics", "EPIC-ALPHA", "epic.json"),
        {"id": "EPIC-ALPHA", "zone": "ALPHA", "seq": 1, "status": "Open",
         "stories": ["STO-ALPHA-01", "STO-ALPHA-02"]})
-    for sid in ("STO-ALPHA-01", "STO-ALPHA-02"):
+    _titles = {"STO-ALPHA-01": "Cadrage initial", "STO-ALPHA-02": "Implémentation moteur"}
+    for sid, ttl in _titles.items():
         wj(os.path.join(eff, "epics", "EPIC-ALPHA", "stories", sid, "story.json"),
-           {"id": sid, "epic_id": "EPIC-ALPHA", "zone": "ALPHA", "status": "Done"})
+           {"id": sid, "epic_id": "EPIC-ALPHA", "zone": "ALPHA", "title": ttl, "status": "Done"})
     wj(os.path.join(eff, "epics", "EPIC-BETA", "epic.json"),
        {"id": "EPIC-BETA", "zone": "BETA", "seq": 2, "status": "Open",
         "stories": ["STO-BETA-01"]})
     wj(os.path.join(eff, "epics", "EPIC-BETA", "stories", "STO-BETA-01", "story.json"),
-       {"id": "STO-BETA-01", "epic_id": "EPIC-BETA", "zone": "BETA", "status": "Doing"})
+       {"id": "STO-BETA-01", "epic_id": "EPIC-BETA", "zone": "BETA",
+        "title": "Recette utilisateur", "status": "Doing"})
     wj(os.path.join(eff, "state.json"),
        {"active_epic_id": "EPIC-BETA", "active_story_id": "STO-BETA-01"})
     wj(os.path.join(eff, "backlog.json"),
@@ -2278,8 +2280,12 @@ def test_nomenclature_plan_maps_ids(tmp_path):
     assert by_old["EPIC-ALPHA"]["new_id"] == "001-Epic-Alpha"
     assert by_old["EPIC-BETA"]["new_id"] == "002-Epic-Beta"
     alpha_stories = {s["old_id"]: s["new_id"] for s in by_old["EPIC-ALPHA"]["stories"]}
-    assert alpha_stories == {"STO-ALPHA-01": "001-Story-Alpha", "STO-ALPHA-02": "002-Story-Alpha"}
-    assert by_old["EPIC-BETA"]["stories"][0]["new_id"] == "001-Story-Beta"
+    # Sujet dérivé du titre (EVO-011), pas du périmètre de l'Epic.
+    assert alpha_stories == {
+        "STO-ALPHA-01": "001-Story-Cadrage-Initial",
+        "STO-ALPHA-02": "002-Story-Implementation-Moteur",
+    }
+    assert by_old["EPIC-BETA"]["stories"][0]["new_id"] == "001-Story-Recette-Utilisateur"
 
 
 def test_nomenclature_apply_renames_and_rewrites(tmp_path):
@@ -2290,29 +2296,30 @@ def test_nomenclature_apply_renames_and_rewrites(tmp_path):
     report = apply_nomenclature(root, plan_nomenclature(root))
     assert report["epics_renamed"] == 2 and report["stories_renamed"] == 3
     eff = os.path.join(root, ".effortless")
-    # Répertoires renommés.
-    assert os.path.isdir(os.path.join(eff, "epics", "002-Epic-Beta", "stories", "001-Story-Beta"))
+    # Répertoires renommés (Story = sujet dérivé du titre).
+    assert os.path.isdir(os.path.join(eff, "epics", "002-Epic-Beta", "stories", "001-Story-Recette-Utilisateur"))
     assert not os.path.exists(os.path.join(eff, "epics", "EPIC-BETA"))
     # epic.json réécrit (id + stories[]).
     with io.open(os.path.join(eff, "epics", "001-Epic-Alpha", "epic.json"), encoding="utf-8") as f:
         e = json.load(f)
-    assert e["id"] == "001-Epic-Alpha" and e["stories"] == ["001-Story-Alpha", "002-Story-Alpha"]
+    assert e["id"] == "001-Epic-Alpha" and e["stories"] == [
+        "001-Story-Cadrage-Initial", "002-Story-Implementation-Moteur"]
     # story.json réécrit (id + epic_id).
-    with io.open(os.path.join(eff, "epics", "002-Epic-Beta", "stories", "001-Story-Beta", "story.json"), encoding="utf-8") as f:
+    with io.open(os.path.join(eff, "epics", "002-Epic-Beta", "stories", "001-Story-Recette-Utilisateur", "story.json"), encoding="utf-8") as f:
         s = json.load(f)
-    assert s["id"] == "001-Story-Beta" and s["epic_id"] == "002-Epic-Beta"
+    assert s["id"] == "001-Story-Recette-Utilisateur" and s["epic_id"] == "002-Epic-Beta"
     # state actif réécrit.
     with io.open(os.path.join(eff, "state.json"), encoding="utf-8") as f:
         st = json.load(f)
-    assert st["active_epic_id"] == "002-Epic-Beta" and st["active_story_id"] == "001-Story-Beta"
+    assert st["active_epic_id"] == "002-Epic-Beta" and st["active_story_id"] == "001-Story-Recette-Utilisateur"
     # backlog : ids réels mappés, logique EPIC-CORE intact.
     with io.open(os.path.join(eff, "backlog.json"), encoding="utf-8") as f:
         ids = [x["id"] for x in json.load(f)["epics"]]
     assert ids == ["001-Epic-Alpha", "002-Epic-Beta", "EPIC-CORE"]
     # frontmatter réécrit.
-    with io.open(os.path.join(root, "cadrage", "001-Epic-Alpha", "001-Story-Alpha", "00-FNC-GLO-x.md"), encoding="utf-8") as f:
+    with io.open(os.path.join(root, "cadrage", "001-Epic-Alpha", "001-Story-Cadrage-Initial", "00-FNC-GLO-x.md"), encoding="utf-8") as f:
         fm = f.read()
-    assert "epic: 001-Epic-Alpha" in fm and "story: 001-Story-Alpha" in fm
+    assert "epic: 001-Epic-Alpha" in fm and "story: 001-Story-Cadrage-Initial" in fm
     assert "cadrage/001-epic-alpha" in fm
 
 
@@ -2326,6 +2333,16 @@ def test_nomenclature_idempotent(tmp_path):
     assert plan2["changed"] is False
     report2 = apply_nomenclature(root, plan2)
     assert report2["epics_renamed"] == 0 and report2["stories_renamed"] == 0
+
+
+def test_slugify_subject_variants():
+    from effortless_mcp.services.nomenclature import slugify_subject
+    # Parenthèses retirées, accents translittérés, stopword 'au' écarté, cap 4 mots.
+    assert slugify_subject("Anti-dérive étendu au travail cadrage (gate)") == "Anti-Derive-Etendu-Travail"
+    assert slugify_subject("Migration des données") == "Migration-Donnees"
+    assert slugify_subject("Dispatch évolutions + moteur de rendu dérivé") == "Dispatch-Evolutions-Moteur-Rendu"
+    assert slugify_subject("") == "Story"                 # repli
+    assert slugify_subject("de la du des") == "De-La-Du-Des"  # tout stopword → brut
 
 
 def test_migrate_nomenclature_tool_dry_run_then_apply(monkeypatch, tmp_path):
@@ -2611,3 +2628,114 @@ def test_bqo_tools_end_to_end(monkeypatch, tmp_path):
     assert "graduée" in out
     listing = server.effortless_bqo_list()
     assert "PQ-001" in listing and "graduated" in listing
+
+
+# ---- Évolutions + backlog : dispatch + rendu dérivé (004-Story-Process / EVO-010) ----
+
+def _read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_evolution_add_render_and_sequence(tmp_path):
+    from effortless_mcp.services.evolutions import add_evolution, load_evolutions
+    root = str(tmp_path)
+    e1 = add_evolution(root, "besoin", "Titre un", "détail un")
+    e2 = add_evolution(root, "finding", "Titre | deux")
+    assert e1["id"] == "EVO-001" and e2["id"] == "EVO-002"
+    assert len(load_evolutions(root)["evolutions"]) == 2
+    md = _read_text(os.path.join(root, "cadrage", "4-Evolutions.md"))
+    assert "EVO-001" in md and "Titre un" in md and "besoin" in md
+    assert "Titre \\| deux" in md          # pipe échappé dans le tableau
+    assert "détail un" in md               # section Détails
+
+
+def test_evolution_add_rejects_bad_type_and_status(tmp_path):
+    from effortless_mcp.services.evolutions import add_evolution
+    root = str(tmp_path)
+    with pytest.raises(ValueError):
+        add_evolution(root, "bug", "x")
+    with pytest.raises(ValueError):
+        add_evolution(root, "finding", "x", status="Wontfix")
+
+
+def test_evolution_set_and_graduate(tmp_path):
+    from effortless_mcp.services.evolutions import add_evolution, set_evolution, graduate_evolution
+    root = str(tmp_path)
+    add_evolution(root, "besoin", "T")
+    upd = set_evolution(root, "EVO-001", status="En cours", resolution="fait")
+    assert upd["status"] == "En cours" and upd["resolution"] == "fait"
+    g = graduate_evolution(root, "EVO-001", "005-Epic-Obsidian")
+    assert g["epic"] == "005-Epic-Obsidian"
+    md = _read_text(os.path.join(root, "cadrage", "4-Evolutions.md"))
+    assert "005-Epic-Obsidian" in md and "fait" in md
+
+
+def test_evolution_graduate_planned_moves_to_en_cours(tmp_path):
+    from effortless_mcp.services.evolutions import add_evolution, graduate_evolution
+    root = str(tmp_path)
+    add_evolution(root, "besoin", "T")  # Planifié par défaut
+    assert graduate_evolution(root, "EVO-001", "005-Epic-X")["status"] == "En cours"
+
+
+def test_evolution_graduate_resolved_not_downgraded(tmp_path):
+    from effortless_mcp.services.evolutions import add_evolution, graduate_evolution
+    root = str(tmp_path)
+    add_evolution(root, "finding", "T", status="Résolu")
+    assert graduate_evolution(root, "EVO-001", "005-Epic-X")["status"] == "Résolu"
+
+
+def test_evolution_graduate_unknown_returns_none(tmp_path):
+    from effortless_mcp.services.evolutions import graduate_evolution
+    assert graduate_evolution(str(tmp_path), "EVO-999", "005-Epic-X") is None
+
+
+def test_backlog_reconcile_from_real_epics(tmp_path):
+    from effortless_mcp.services.backlog import reconcile_backlog
+    root = str(tmp_path)
+    _epic_fixture(root)  # 002-Epic-Demo : 1 Done / 2 stories
+    data = reconcile_backlog(root)
+    ent = next(e for e in data["epics"] if e["id"] == "002-Epic-Demo")
+    assert ent["stories_done"] == 1 and ent["stories_total"] == 2
+    assert ent["perimetre"] == "Demo" and ent["status"] == "Open"
+    md = _read_text(os.path.join(root, "cadrage", "3-Backlog.md"))
+    assert "002-Epic-Demo" in md and "1/2" in md
+
+
+def test_backlog_reconcile_preserves_editorial_and_pinned(tmp_path):
+    from effortless_mcp.services.backlog import reconcile_backlog, _backlog_path, _write_json
+    root = str(tmp_path)
+    _epic_fixture(root)
+    _write_json(_backlog_path(root), {"version": 1, "epics": [
+        {"id": "EPIC-CORE", "perimetre": "Core", "intent": "Noyau", "status": "Done"},
+        {"id": "002-Epic-Demo", "perimetre": "Demo", "intent": "Intention éditoriale", "status": "Todo"},
+    ]})
+    data = reconcile_backlog(root)
+    core = next(e for e in data["epics"] if e["id"] == "EPIC-CORE")
+    demo = next(e for e in data["epics"] if e["id"] == "002-Epic-Demo")
+    assert core["intent"] == "Noyau"                     # entrée sans dir préservée
+    assert demo["intent"] == "Intention éditoriale"      # éditorial préservé
+    assert demo["status"] == "Open" and demo["stories_done"] == 1  # état dérivé du réel
+
+
+def test_backlog_reconcile_appends_new_epic(tmp_path):
+    from effortless_mcp.services.backlog import reconcile_backlog
+    root = str(tmp_path)
+    _epic_fixture(root, epic_id="007-Epic-New", zone="NEW")
+    ids = [e["id"] for e in reconcile_backlog(root)["epics"]]
+    assert "007-Epic-New" in ids
+
+
+def test_evolution_tools_end_to_end(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    out = server.effortless_evolution_add("besoin", "Config Obsidian embarquée", "tweak + embed")
+    assert "EVO-001" in out
+    grad = server.effortless_evolution_graduate("EVO-001", zone="OBSIDIAN", title="Config Obsidian")
+    assert "graduée" in grad
+    # L'Epic est créé et inscrit dans le backlog (rendu dérivé, sans drift).
+    backlog_md = _read_text(os.path.join(str(tmp_path), "cadrage", "3-Backlog.md"))
+    assert "-Epic-Obsidian" in backlog_md
+    evo_md = _read_text(os.path.join(str(tmp_path), "cadrage", "4-Evolutions.md"))
+    assert "EVO-001" in evo_md and "-Epic-Obsidian" in evo_md

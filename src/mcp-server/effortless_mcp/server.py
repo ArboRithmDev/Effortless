@@ -386,6 +386,7 @@ def effortless_story_start(
     opale_phase: Optional[str] = None,
     depends_on: Optional[List[str]] = None,
     activate: bool = True,
+    slug: Optional[str] = None,
 ) -> str:
     """
     Crée une nouvelle Story sous un Epic existant et (par défaut) l'active.
@@ -438,13 +439,14 @@ def effortless_story_start(
             f"Allowed: {', '.join(p['id'] for p in phases_list)}."
         )
 
-    # ID séquentiel PAR Epic, nouvelle forme : <NNN>-Story-<Périmètre>.
+    # ID séquentiel PAR Epic, forme <NNN>-Story-<Sujet> : le sujet dérive du TITRE
+    # de la Story (lisible dans Obsidian, EVO-011), ou d'un `slug` explicite fourni.
     from effortless_mcp.services.nomenclature import (
-        format_story_id, perimetre_of, next_story_seq,
+        format_story_id, slugify_subject, next_story_seq,
     )
-    story_perimetre = perimetre_of(resolved_zone, target_epic_id)
+    story_subject = (slug or "").strip() or slugify_subject(title)
     story_seq = next_story_seq(root, target_epic_id)
-    story_id = format_story_id(story_seq, story_perimetre)
+    story_id = format_story_id(story_seq, story_subject)
 
     story = Story(
         id=story_id,
@@ -488,6 +490,9 @@ def effortless_story_start(
     # Rafraîchit le registre des stories de l'Epic (rendu dérivé).
     from effortless_mcp.services.epic_cadrage import refresh_epic_cadrage
     refresh_epic_cadrage(root, target_epic_id, epic_data)
+    # Réconcilie le backlog (compteurs stories) — rendu dérivé, jamais de drift.
+    from effortless_mcp.services.backlog import reconcile_backlog
+    reconcile_backlog(root)
 
     # Bascule de la Story active (modèle fractal : la phase suit la Story active).
     activated_msg = ""
@@ -630,6 +635,114 @@ def effortless_bqo_list() -> str:
 
 
 @mcp.tool()
+def effortless_evolution_add(type: str, title: str, detail: str = "", status: str = "Planifié") -> str:
+    """
+    Enregistre une évolution projet (004-Story-Process).
+
+    Source de vérité `.effortless/evolutions.json`, rendu dérivé `cadrage/4-Evolutions.md`
+    régénéré automatiquement (fin du hand-edit du registre). `type` ∈ {finding, besoin} ;
+    `status` ∈ {Planifié, En cours, Résolu}. Une évolution mûre gradue en Epic via
+    effortless_evolution_graduate.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.services.evolutions import add_evolution
+    try:
+        evo = add_evolution(root, type, title, detail, status)
+    except ValueError as e:
+        return f"Error: {e}."
+    return (f"Évolution {evo['id']} enregistrée ({evo['type']}, {evo['status']}). "
+            f"Rendu : cadrage/4-Evolutions.md.")
+
+
+@mcp.tool()
+def effortless_evolution_graduate(
+    evo_id: str,
+    zone: Optional[str] = None,
+    title: Optional[str] = None,
+    epic_id: Optional[str] = None,
+    description: str = "",
+) -> str:
+    """
+    Gradue une évolution en Epic (004-Story-Process, scaffold anticipé P4).
+
+    Crée (ou réutilise, idempotent par périmètre) un Epic et rattache l'évolution
+    (`evolution.epic`, statut Planifié → En cours). Fournir soit `epic_id` existant,
+    soit `zone` (+`title`) pour créer l'Epic. Régénère les rendus dérivés (4-Evolutions.md
+    et 3-Backlog.md). N'active pas l'Epic (préparation, pas bascule).
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.services.evolutions import graduate_evolution, load_evolutions
+    if not any(e.get("id") == evo_id for e in load_evolutions(root).get("evolutions", [])):
+        return f"Error: évolution '{evo_id}' introuvable."
+    target_epic = epic_id
+    created = False
+    if target_epic is None:
+        if not (zone or "").strip():
+            return "Error: fournir epic_id, ou zone (+title) pour créer l'Epic."
+        etitle = (title or "").strip() or f"Epic issu de {evo_id}"
+        target_epic, created = _create_or_get_epic(
+            root, zone.strip().upper(), etitle, description, activate=False
+        )
+    elif not os.path.exists(os.path.join(get_epic_dir(root, target_epic), "epic.json")):
+        return f"Error: Epic '{target_epic}' introuvable."
+    evo = graduate_evolution(root, evo_id, target_epic)
+    verb = "créé" if created else "rattaché à"
+    return (f"Évolution {evo_id} graduée → Epic {verb} {target_epic} "
+            f"(statut {evo['status']}). Rendus régénérés (4-Evolutions.md, 3-Backlog.md).")
+
+
+def _create_or_get_epic(root: str, zone: str, title: str, description: str = "",
+                        activate: bool = True) -> tuple:
+    """Cœur de la création d'Epic, réutilisé par epic_start et evolution_graduate.
+
+    Retourne ``(epic_id, created)``. Idempotent par périmètre : si un Epic de même
+    périmètre existe, il est retourné sans écrasement (``created=False``). Réconcilie
+    toujours le backlog après coup (fin du drift : l'Epic est inscrit dans backlog.json).
+    """
+    paths = get_paths(root)
+    from effortless_mcp.models.epic import Epic
+    from effortless_mcp.services.nomenclature import (
+        format_epic_id, perimetre_of, next_epic_seq, epic_with_perimetre_exists,
+    )
+    z = zone.strip().upper()
+    perimetre = perimetre_of(z, "")
+    existing = epic_with_perimetre_exists(root, perimetre)
+    if existing:
+        epic_id, created = existing, False
+    else:
+        seq = next_epic_seq(root)
+        epic_id = format_epic_id(seq, perimetre)
+        epic_dir = get_epic_dir(root, epic_id)
+        os.makedirs(os.path.join(epic_dir, "stories"), exist_ok=True)
+        epic = Epic(id=epic_id, zone=z, title=title, description=description or None).model_dump()
+        epic["seq"] = seq
+        epic["stories"] = []
+        save_entity(epic_dir, "epic", epic)
+        # Dossier + docs de cadrage epic-scopés (charte 0-Epic + registre 1-Stories).
+        os.makedirs(os.path.join(root, "cadrage", epic_id), exist_ok=True)
+        from effortless_mcp.services.epic_cadrage import refresh_epic_cadrage
+        refresh_epic_cadrage(root, epic_id, epic)
+        created = True
+    if activate:
+        with open(paths["state"], "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+        state_data["active_epic_id"] = epic_id
+        state_data["active_story_id"] = None  # Epic vide : pas de Story active tant qu'aucune n'est amorcée.
+        with open(paths["state"], "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
+    # Registre backlog : rendu dérivé réconcilié depuis les Epics réels.
+    from effortless_mcp.services.backlog import reconcile_backlog
+    reconcile_backlog(root)
+    return epic_id, created
+
+
+@mcp.tool()
 def effortless_epic_start(zone: str, title: str, description: str = "", activate: bool = True) -> str:
     """
     Crée un nouvel Epic (EPIC-<ZONE>) et, par défaut, l'active.
@@ -649,35 +762,14 @@ def effortless_epic_start(zone: str, title: str, description: str = "", activate
     if not (title or "").strip():
         return "Error: title requis."
 
-    from effortless_mcp.models.epic import Epic
-    from effortless_mcp.services.nomenclature import (
-        format_epic_id, perimetre_of, next_epic_seq, epic_with_perimetre_exists,
-    )
+    from effortless_mcp.services.nomenclature import perimetre_of, epic_with_perimetre_exists
     perimetre = perimetre_of(z, "")
     existing = epic_with_perimetre_exists(root, perimetre)
     if existing:
         return f"Epic de périmètre '{perimetre}' existe déjà ('{existing}', idempotent, non écrasé)."
-    seq = next_epic_seq(root)
-    epic_id = format_epic_id(seq, perimetre)
-    epic_dir = get_epic_dir(root, epic_id)
-    os.makedirs(os.path.join(epic_dir, "stories"), exist_ok=True)
-    epic = Epic(id=epic_id, zone=z, title=title, description=description or None).model_dump()
-    epic["seq"] = seq
-    epic["stories"] = []
-    save_entity(epic_dir, "epic", epic)
-    # Dossier + docs de cadrage epic-scopés (charte 0-Epic + registre 1-Stories).
-    os.makedirs(os.path.join(root, "cadrage", epic_id), exist_ok=True)
-    from effortless_mcp.services.epic_cadrage import refresh_epic_cadrage
-    refresh_epic_cadrage(root, epic_id, epic)
-
+    epic_id, _created = _create_or_get_epic(root, z, title, description, activate)
     activated = ""
     if activate:
-        with open(paths["state"], "r", encoding="utf-8") as f:
-            state_data = json.load(f)
-        state_data["active_epic_id"] = epic_id
-        state_data["active_story_id"] = None  # Epic vide : pas de Story active tant qu'aucune n'est amorcée.
-        with open(paths["state"], "w", encoding="utf-8") as f:
-            json.dump(state_data, f, indent=2, ensure_ascii=False)
         activated = f" Epic actif = {epic_id} (ajoute une Story via effortless_story_start)."
     return f"Epic {epic_id} créé ('{title}').{activated}"
 
@@ -717,6 +809,12 @@ def effortless_story_complete(story_id: Optional[str] = None) -> str:
     from effortless_mcp.services.epic_cadrage import render_story_registry
     try:
         render_story_registry(root, epic_id)
+    except OSError:
+        pass
+    # Réconcilie le backlog (compteur stories_done) — rendu dérivé.
+    try:
+        from effortless_mcp.services.backlog import reconcile_backlog
+        reconcile_backlog(root)
     except OSError:
         pass
     return f"Story '{sid}' clôturée (Done)."
