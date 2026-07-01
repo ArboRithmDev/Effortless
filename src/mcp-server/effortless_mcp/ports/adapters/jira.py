@@ -79,7 +79,16 @@ class QueueTracker:
         return None
 
     def log_work(self, ref: TrackerRef, minutes: int, comment: str) -> None:
-        raise NotImplementedError("QueueTracker.log_work — hors MVP (story suivante).")
+        # Médié : enqueue une op « log_work » ; l'agent (Rovo) la joue via
+        # addWorklogToJiraIssue puis flush_ack. Le rollup temps sous-tâche→parent est
+        # natif Jira — aucune projection supplémentaire. `tracker_id` peut être un
+        # placeholder `local:N` que l'agent résout via sa map de refs.
+        self._journal.enqueue("log_work", {
+            "tracker_id": ref.tracker_id,
+            "minutes": minutes,
+            "comment": comment,
+        })
+        return None
 
     def import_tree(self, project: ProjectRef) -> List[ImportedObject]:
         return []

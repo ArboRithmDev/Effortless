@@ -120,3 +120,20 @@ def project_task_transitioned(root: str, task: dict, status: str) -> None:
             "transition",
             {"id": task.get("id"), "status": status},
         )
+
+
+def project_task_log_work(root: str, task: dict, minutes: int, comment: str = "") -> None:
+    """Projette du temps passé sur une Task. Tracker injoignable → migration outbox.
+
+    Best-effort : n'échoue jamais l'opération locale. Le rollup temps est natif Jira."""
+    tracker = resolve_tracker(_read_settings(root), root)
+    if isinstance(tracker, NullTracker):
+        return  # non couplé : no-op, zéro I/O
+    ref = TrackerRef(task.get("tracker_id", ""), task.get("tracker_url", ""))
+    try:
+        tracker.log_work(ref, minutes, comment)
+    except Exception:
+        SyncJournal(root).enqueue(
+            "log_work",
+            {"id": task.get("id"), "minutes": minutes, "comment": comment},
+        )

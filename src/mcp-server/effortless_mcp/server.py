@@ -1574,6 +1574,44 @@ def effortless_tracker_flush_ack(seqs_json: str = "") -> str:
 
 
 @mcp.tool()
+def effortless_tracker_log_work(task_id: str, minutes: int, comment: str = "") -> str:
+    """
+    Enregistre du temps passé (minutes) sur une tâche et l'enqueue pour projection Jira.
+
+    Projection médiée (STO-TRACKER-06) : le serveur enqueue une op « log_work » ;
+    l'agent (Rovo) la joue via addWorklogToJiraIssue puis effortless_tracker_flush_ack.
+    Le rollup temps sous-tâche→parent est natif Jira. Sans couplage : no-op.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["tasks"]):
+        return "Error: Project not initialized."
+    if not isinstance(minutes, int) or minutes <= 0:
+        return "Error: minutes doit être un entier strictement positif."
+
+    tasks_dir = resolve_registry_dir(root, "tasks")
+    tasks = load_entities(tasks_dir)
+    target_task = next((t for t in tasks if t["id"] == task_id), None)
+    if not target_task:
+        return f"Error: Task '{task_id}' not found."
+
+    from effortless_mcp.ports import ROVO_DISCLAIMER, NullTracker, resolve_tracker
+    from effortless_mcp.ports.integration import project_task_log_work
+
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        settings = (json.load(f).get("settings") or {})
+    if isinstance(resolve_tracker(settings, root), NullTracker):
+        return f"Projet non couplé : temps non projeté (no-op). {minutes} min noté(es) localement."
+
+    project_task_log_work(root, target_task, minutes, comment)
+    return (
+        f"{ROVO_DISCLAIMER}\n\n"
+        f"Temps planifié : {minutes} min sur '{task_id}' ({target_task.get('tracker_id') or 'ref locale'}). "
+        f"Exécute via effortless_tracker_pending (Rovo addWorklogToJiraIssue), puis effortless_tracker_flush_ack."
+    )
+
+
+@mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """
     Initialise une session de développement itératif autonome avec un objectif global spécifié.

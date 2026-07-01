@@ -1801,3 +1801,79 @@ def test_flush_ack_rejects_bad_input(monkeypatch):
         server.effortless_init("P", "d")
         assert "invalide" in server.effortless_tracker_flush_ack("{bad")
         assert "entiers" in server.effortless_tracker_flush_ack('["x"]')
+
+
+# --- Log_work médié — STO-TRACKER-06 ------------------------------------------
+
+def test_queue_tracker_log_work_enqueues(tmp_path):
+    from effortless_mcp.ports import SyncJournal, TrackerRef
+    from effortless_mcp.ports.adapters.jira import QueueTracker
+    j = SyncJournal(str(tmp_path))
+    QueueTracker(j).log_work(TrackerRef("EFL-42", "u/EFL-42"), 90, "dev transition")
+    op = j.pending()[0]
+    assert op["op"] == "log_work"
+    assert op["args"] == {"tracker_id": "EFL-42", "minutes": 90, "comment": "dev transition"}
+
+
+def test_log_work_projected_via_integration(tmp_path):
+    from effortless_mcp.ports import register_adapter, SyncJournal
+    from effortless_mcp.ports.adapters.jira import build_queue_tracker
+    from effortless_mcp.ports.integration import project_task_log_work
+    register_adapter("jira", build_queue_tracker)
+    cfg = os.path.join(str(tmp_path), "effortless.json")
+    with open(cfg, "w", encoding="utf-8") as f:
+        json.dump({"settings": {"tracker": {"type": "jira", "project_id": "EFL"}}}, f)
+    task = {"id": "TSK-01", "tracker_id": "EFL-7", "tracker_url": "u/EFL-7"}
+    project_task_log_work(str(tmp_path), task, 30, "revue")
+    op = SyncJournal(str(tmp_path)).pending()[0]["args"]
+    assert op["tracker_id"] == "EFL-7" and op["minutes"] == 30 and op["comment"] == "revue"
+
+
+def test_log_work_uncoupled_no_io(tmp_path):
+    from effortless_mcp.ports.integration import project_task_log_work
+    from effortless_mcp.ports import SyncJournal
+    # Non couplé (pas d'effortless.json / tracker) : no-op, aucun outbox.
+    project_task_log_work(str(tmp_path), {"id": "T", "tracker_id": "EFL-1"}, 10, "x")
+    assert SyncJournal(str(tmp_path)).pending() == []
+
+
+def test_tracker_log_work_tool_flow(monkeypatch):
+    # couple -> task_add (create enqueue) -> log_work (enqueue) -> pending -> flush_ack.
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_task_add("Tâche témoin")
+
+        out = server.effortless_tracker_log_work("TSK-01", 45, "impl")
+        assert "45 min" in out and "Rovo" in out
+
+        data = json.loads(server.effortless_tracker_pending().split("\n\n", 1)[1])["pending"]
+        lw = [o for o in data if o["op"] == "log_work"]
+        assert len(lw) == 1 and lw[0]["minutes"] == 45 and lw[0]["comment"] == "impl"
+
+        server.effortless_tracker_flush_ack("")  # marque tout joué
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_tracker_log_work_tool_guards(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_task_add("T")
+        assert "positif" in server.effortless_tracker_log_work("TSK-01", 0, "x")
+        assert "not found" in server.effortless_tracker_log_work("TSK-99", 10, "x")
+
+
+def test_tracker_log_work_uncoupled_noop(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_task_add("T")
+        out = server.effortless_tracker_log_work("TSK-01", 20, "x")
+        assert "no-op" in out
+        assert "Aucune opération" in server.effortless_tracker_pending()
