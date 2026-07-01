@@ -125,5 +125,8 @@ def refresh_epic_cadrage(root: str, epic_id: str, epic: Optional[dict] = None) -
         epic = epic or _read_json(os.path.join(_epic_dir(root, epic_id), "epic.json")) or {}
         write_epic_charter(root, epic_id, epic)
         render_story_registry(root, epic_id, epic)
+        # BQO d'Epic (006-Story-Cadrage) : rendu dérivé de epic.json["bqo"].
+        from effortless_mcp.services.bqo import render_epic_bqo
+        render_epic_bqo(root, epic_id, epic)
     except OSError:
         pass

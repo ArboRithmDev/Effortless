@@ -571,6 +571,65 @@ def effortless_cadrage_docs_scaffold(story_id: Optional[str] = None) -> str:
 
 
 @mcp.tool()
+def effortless_bqo_ask(question: str) -> str:
+    """
+    Enregistre une question de cadrage niveau PROJET (006-Story-Cadrage).
+
+    Question transverse pas encore rattachée à un Epic. Source unique
+    `.effortless/questions_projet.json`, rendu dérivé `cadrage/5-Questions.md`.
+    Une question mûre gradue ensuite en BQO d'Epic via effortless_bqo_graduate.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.services.bqo import add_project_question
+    q = add_project_question(root, question)
+    return f"Question projet {q['id']} enregistrée (open). Rendu : cadrage/5-Questions.md."
+
+
+@mcp.tool()
+def effortless_bqo_graduate(question_id: str, epic_id: str) -> str:
+    """
+    Gradue une question projet en BQO d'un Epic (006-Story-Cadrage).
+
+    Marque la question `graduated` (rattachée à l'Epic) et la copie dans
+    `epic.json["bqo"]`. Régénère `cadrage/5-Questions.md` + `cadrage/<epic>/2-BQO.md`.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.services.bqo import graduate_question
+    q = graduate_question(root, question_id, epic_id)
+    if q is None:
+        return f"Error: question '{question_id}' ou epic '{epic_id}' introuvable."
+    return (
+        f"Question {question_id} graduée en BQO de {epic_id}. "
+        f"Rendus régénérés (5-Questions + {epic_id}/2-BQO)."
+    )
+
+
+@mcp.tool()
+def effortless_bqo_list() -> str:
+    """Liste les questions de cadrage projet (006-Story-Cadrage)."""
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.services.bqo import load_project_questions
+    qs = load_project_questions(root).get("questions", [])
+    if not qs:
+        return "Aucune question projet."
+    lines = [
+        f"- {q.get('id')} [{q.get('status')}]"
+        f"{(' → ' + q['epic']) if q.get('epic') else ''} : {q.get('text','')}"
+        for q in qs
+    ]
+    return "Questions projet :\n" + "\n".join(lines)
+
+
+@mcp.tool()
 def effortless_epic_start(zone: str, title: str, description: str = "", activate: bool = True) -> str:
     """
     Crée un nouvel Epic (EPIC-<ZONE>) et, par défaut, l'active.

@@ -2557,3 +2557,57 @@ def test_init_rejects_unknown_mode(monkeypatch, tmp_path):
     out = server.effortless_init("P", "d", mode="waterfall")
     assert out.startswith("Error:")
     assert not os.path.exists(os.path.join(str(tmp_path), "effortless.json"))
+
+
+def test_bqo_add_and_render_project_questions(tmp_path):
+    from effortless_mcp.services.bqo import add_project_question, load_project_questions
+    root = str(tmp_path)
+    q1 = add_project_question(root, "Faut-il gater l'enqueue en dogfood ?")
+    q2 = add_project_question(root, "Registre pipe | échappé ?")
+    assert q1["id"] == "PQ-001" and q2["id"] == "PQ-002"
+    assert load_project_questions(root)["questions"][0]["status"] == "open"
+    with open(os.path.join(root, "cadrage", "5-Questions.md"), encoding="utf-8") as f:
+        doc = f.read()
+    assert "type: cadrage-projet" in doc
+    assert "| PQ-001 |" in doc and "Registre pipe \\| échappé" in doc
+
+
+def test_bqo_graduate_to_epic(tmp_path):
+    from effortless_mcp.services.bqo import add_project_question, graduate_question, load_project_questions
+    root = str(tmp_path)
+    eid = _epic_fixture(root)  # 002-Epic-Demo
+    q = add_project_question(root, "Comment borner le périmètre de l'Epic ?")
+    graduated = graduate_question(root, q["id"], eid)
+    assert graduated["status"] == "graduated" and graduated["epic"] == eid
+    # Question copiée dans epic.json["bqo"].
+    ej = json.load(open(os.path.join(root, ".effortless", "epics", eid, "epic.json"), encoding="utf-8"))
+    assert any(b["id"] == q["id"] for b in ej["bqo"])
+    # Rendu BQO d'Epic dérivé.
+    with open(os.path.join(root, "cadrage", eid, "2-BQO.md"), encoding="utf-8") as f:
+        bqo = f.read()
+    assert "type: cadrage-epic-bqo" in bqo and q["id"] in bqo
+    # Graduation idempotente (pas de doublon dans le BQO).
+    graduate_question(root, q["id"], eid)
+    ej2 = json.load(open(os.path.join(root, ".effortless", "epics", eid, "epic.json"), encoding="utf-8"))
+    assert len([b for b in ej2["bqo"] if b["id"] == q["id"]]) == 1
+
+
+def test_bqo_graduate_unknown_returns_none(tmp_path):
+    from effortless_mcp.services.bqo import graduate_question, add_project_question
+    root = str(tmp_path)
+    _epic_fixture(root)
+    q = add_project_question(root, "X")
+    assert graduate_question(root, q["id"], "999-Epic-Absent") is None
+    assert graduate_question(root, "PQ-999", "002-Epic-Demo") is None
+
+
+def test_bqo_tools_end_to_end(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    server.effortless_bqo_ask("Question transverse ?")
+    eid = _state(str(tmp_path))["active_epic_id"]
+    out = server.effortless_bqo_graduate("PQ-001", eid)
+    assert "graduée" in out
+    listing = server.effortless_bqo_list()
+    assert "PQ-001" in listing and "graduated" in listing
