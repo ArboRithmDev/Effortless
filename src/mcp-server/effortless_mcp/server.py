@@ -674,9 +674,12 @@ def effortless_migrate_nomenclature(confirm: bool = False) -> str:
             f"{mapping}\n\nRelance avec confirm=True pour appliquer (sauvegarde recommandée)."
         )
     report = apply_nomenclature(root, plan)
+    warns = report.get("warnings") or []
+    warn_txt = ("\n⚠️ Cadrage (best-effort) : " + " | ".join(warns) +
+                "\nRe-lance après avoir libéré le lock (idempotent).") if warns else ""
     return (
         f"Nomenclature migrée : {report['epics_renamed']} Epic(s), "
-        f"{report['stories_renamed']} Story(ies) renommé(s).\n{mapping}\n"
+        f"{report['stories_renamed']} Story(ies) renommé(s).\n{mapping}{warn_txt}\n"
         f"⚠️ Reconnecte le MCP effortless."
     )
 

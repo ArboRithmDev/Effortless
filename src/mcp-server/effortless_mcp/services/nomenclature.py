@@ -17,7 +17,23 @@ import json
 import os
 import re
 import shutil
+import time
 from typing import Dict, List, Optional
+
+
+def _robust_move(src: str, dst: str, attempts: int = 5) -> None:
+    """Renomme src→dst en tolérant les locks transitoires Windows (indexeur, AV) :
+    retries espacés, puis repli sur shutil.move. Lève si tout échoue."""
+    last = None
+    for i in range(attempts):
+        try:
+            os.rename(src, dst)
+            return
+        except OSError as e:
+            last = e
+            time.sleep(0.15 * (i + 1))
+    shutil.move(src, dst)  # dernier recours ; lève si toujours bloqué
+    _ = last
 
 _EPIC_RE = re.compile(r"^\d{3}-Epic-.+$")
 _STORY_RE = re.compile(r"^\d{3}-Story-.+$")
@@ -165,22 +181,22 @@ def apply_nomenclature(root: str, plan: Optional[dict] = None) -> dict:
 
     epic_map: Dict[str, str] = {}
     story_map: Dict[str, str] = {}
+    warnings: List[str] = []
     epics_renamed = 0
     stories_renamed = 0
 
+    # === Phase 1 : MODÈLE (.effortless) — critique, doit aboutir. ===
     for ep in plan["epics"]:
         old_epic, new_epic = ep["old_id"], ep["new_id"]
         epic_map[old_epic] = new_epic
         old_epic_path = os.path.join(epics_dir, ep["old_dir"])
         stories_dir = os.path.join(old_epic_path, "stories")
 
-        # 1) Stories : renomme le répertoire + réécrit story.json (id + epic_id).
         for st in ep["stories"]:
             old_sid, new_sid = st["old_id"], st["new_id"]
             story_map[old_sid] = new_sid
             old_sp = os.path.join(stories_dir, old_sid)
-            new_sp = os.path.join(stories_dir, new_sid)
-            sjson = os.path.join(old_sp if old_sid == new_sid else old_sp, "story.json")
+            sjson = os.path.join(old_sp, "story.json")
             if os.path.isfile(sjson):
                 s = _read_json(sjson)
                 s["id"] = new_sid
@@ -188,10 +204,9 @@ def apply_nomenclature(root: str, plan: Optional[dict] = None) -> dict:
                 s["seq"] = st["seq"]
                 _write_json(sjson, s)
             if old_sid != new_sid and os.path.isdir(old_sp):
-                os.rename(old_sp, new_sp)
+                _robust_move(old_sp, os.path.join(stories_dir, new_sid))
                 stories_renamed += 1
 
-        # 2) epic.json : id, stories[], seq.
         ejson = os.path.join(old_epic_path, "epic.json")
         if os.path.isfile(ejson):
             e = _read_json(ejson)
@@ -200,44 +215,53 @@ def apply_nomenclature(root: str, plan: Optional[dict] = None) -> dict:
             e["stories"] = [st["new_id"] for st in ep["stories"]]
             _write_json(ejson, e)
 
-        # 3) répertoire de l'Epic.
         if old_epic != new_epic:
-            os.rename(old_epic_path, os.path.join(epics_dir, new_epic))
+            _robust_move(old_epic_path, os.path.join(epics_dir, new_epic))
             epics_renamed += 1
 
-        # 4) cadrage : renomme dossiers epic/story + réécrit le frontmatter.
-        old_cad_epic = os.path.join(cadrage_dir, old_epic)
-        new_cad_epic = os.path.join(cadrage_dir, new_epic)
-        if os.path.isdir(old_cad_epic) and old_epic != new_epic:
-            os.rename(old_cad_epic, new_cad_epic)
-        cad_epic = new_cad_epic if os.path.isdir(new_cad_epic) else old_cad_epic
-        if os.path.isdir(cad_epic):
-            for st in ep["stories"]:
-                old_cs = os.path.join(cad_epic, st["old_id"])
-                new_cs = os.path.join(cad_epic, st["new_id"])
-                if os.path.isdir(old_cs) and st["old_id"] != st["new_id"]:
-                    os.rename(old_cs, new_cs)
-                cs = new_cs if os.path.isdir(new_cs) else old_cs
-                if os.path.isdir(cs):
-                    fm_repl = {
-                        f"epic: {old_epic}": f"epic: {new_epic}",
-                        f"story: {st['old_id']}": f"story: {st['new_id']}",
-                        f"cadrage/{old_epic.lower()}": f"cadrage/{new_epic.lower()}",
-                    }
-                    for fn in os.listdir(cs):
-                        if fn.endswith(".md"):
-                            _rewrite_frontmatter(os.path.join(cs, fn), fm_repl)
-
-    # 5) Références globales : state, backlog, rendus de cadrage racine.
+    # === Phase 2 : références globales du modèle (state, backlog). ===
     all_repl = {**epic_map, **story_map}
     _replace_in_file(os.path.join(root, ".effortless", "state.json"), all_repl)
     _replace_in_file(os.path.join(root, ".effortless", "backlog.json"), epic_map)
-    _replace_in_file(os.path.join(cadrage_dir, "3-Backlog.md"), all_repl)
-    _replace_in_file(os.path.join(cadrage_dir, "4-Evolutions.md"), all_repl)
+
+    # === Phase 3 : CADRAGE — documentation, best-effort (un lock ne corrompt pas le modèle). ===
+    for ep in plan["epics"]:
+        old_epic, new_epic = ep["old_id"], ep["new_id"]
+        try:
+            old_cad_epic = os.path.join(cadrage_dir, old_epic)
+            new_cad_epic = os.path.join(cadrage_dir, new_epic)
+            if os.path.isdir(old_cad_epic) and old_epic != new_epic:
+                _robust_move(old_cad_epic, new_cad_epic)
+            cad_epic = new_cad_epic if os.path.isdir(new_cad_epic) else old_cad_epic
+            if os.path.isdir(cad_epic):
+                for st in ep["stories"]:
+                    old_cs = os.path.join(cad_epic, st["old_id"])
+                    new_cs = os.path.join(cad_epic, st["new_id"])
+                    if os.path.isdir(old_cs) and st["old_id"] != st["new_id"]:
+                        _robust_move(old_cs, new_cs)
+                    cs = new_cs if os.path.isdir(new_cs) else old_cs
+                    if os.path.isdir(cs):
+                        fm_repl = {
+                            f"epic: {old_epic}": f"epic: {new_epic}",
+                            f"story: {st['old_id']}": f"story: {st['new_id']}",
+                            f"cadrage/{old_epic.lower()}": f"cadrage/{new_epic.lower()}",
+                        }
+                        for fn in os.listdir(cs):
+                            if fn.endswith(".md"):
+                                _rewrite_frontmatter(os.path.join(cs, fn), fm_repl)
+        except OSError as e:
+            warnings.append(f"cadrage {old_epic}: {e} (re-lance après avoir libéré le lock)")
+
+    for fn in ("3-Backlog.md", "4-Evolutions.md"):
+        try:
+            _replace_in_file(os.path.join(cadrage_dir, fn), all_repl)
+        except OSError as e:
+            warnings.append(f"cadrage {fn}: {e}")
 
     return {
         "epics_renamed": epics_renamed,
         "stories_renamed": stories_renamed,
         "epic_map": epic_map,
         "story_map": story_map,
+        "warnings": warnings,
     }
