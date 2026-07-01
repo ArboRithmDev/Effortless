@@ -1,0 +1,29 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": true,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    { "query": "tag:#cadrage/projet", "color": { "a": 1, "rgb": 38536 } },
+    { "query": "tag:#cadrage/epic", "color": { "a": 1, "rgb": 10233776 } },
+    { "query": "[statut:\"À rédiger\"]", "color": { "a": 1, "rgb": 10395294 } },
+    { "query": "[statut:\"En cours\"]", "color": { "a": 1, "rgb": 16750592 } },
+    { "query": "[statut:\"Rédigé\"]", "color": { "a": 1, "rgb": 4890367 } },
+    { "query": "[statut:\"Validé\"]", "color": { "a": 1, "rgb": 4176208 } }
+  ],
+  "collapse-display": true,
+  "showArrow": false,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": true,
+  "centerStrength": 0.5,
+  "repelStrength": 10,
+  "linkStrength": 1,
+  "linkDistance": 250,
+  "scale": 1,
+  "close": true
+}

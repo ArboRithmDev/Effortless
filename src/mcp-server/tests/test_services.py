@@ -2452,8 +2452,28 @@ def test_story_doc_frontmatter_schema():
                                "05-FNC-SPE-specifications.md", "A-specs")
     assert "type: cadrage-story" in fm
     assert "epic: 003-Epic-Cadrage" in fm and "story: 004-Story-Cadrage" in fm
+    assert "titre: Specifications" in fm          # titre lisible (EVO-014)
     assert "code: FNC-SPE" in fm and "phase: A-specs" in fm
     assert "  - cadrage/003-epic-cadrage" in fm and "  - cadrage/fnc-spe" in fm
+
+
+def test_backfill_titre_idempotent(tmp_path):
+    from effortless_mcp.services.cadrage_frontmatter import backfill_titre
+    root = str(tmp_path)
+    d = os.path.join(root, "cadrage", "002-Epic-X", "001-Story-Y")
+    os.makedirs(d)
+    # Doc story SANS titre.
+    with open(os.path.join(d, "00-FNC-GLO-glossaire.md"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("---\nphase: O\nstatut: Validé\ntype: cadrage-story\nepic: 002-Epic-X\n---\n\n# X\n")
+    # Doc projet (non-story) : ne doit pas être touché.
+    with open(os.path.join(root, "cadrage", "0-MVP.md"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("---\ntype: cadrage-projet\n---\n\n# MVP\n")
+    changed = backfill_titre(root)
+    assert len(changed) == 1
+    txt = _read_text(os.path.join(d, "00-FNC-GLO-glossaire.md"))
+    assert "titre: Glossaire" in txt
+    # 2e passe : idempotent (titre déjà présent).
+    assert backfill_titre(root) == []
 
 
 def test_scaffold_story_docs_creates_missing_never_overwrites(tmp_path):
@@ -2824,3 +2844,36 @@ def test_proposal_soft_gate_does_not_block(monkeypatch, tmp_path):
     server.effortless_task_add("Tâche libre")
     out = server.effortless_task_update("TSK-01", "Doing")
     assert "Doing" in out and "Error" not in out
+
+
+# ---- Embed vault Obsidian curé (005-Story-Embed-Config-Obsidian) ----
+
+def test_init_deploys_obsidian_vault_template(monkeypatch, tmp_path):
+    import glob
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    cad = os.path.join(str(tmp_path), "cadrage")
+    # Dashboards + config déployés.
+    assert os.path.exists(os.path.join(cad, "6-Suivi.base"))
+    assert os.path.exists(os.path.join(cad, "6-Suivi-stats.md"))
+    cp = _read_text(os.path.join(cad, ".obsidian", "community-plugins.json"))
+    assert "dataview" in cp and "folders2graph" in cp
+    assert "local-rest-api" not in cp                       # aucun plugin à secret
+    # Plugin vendu présent.
+    assert os.path.exists(os.path.join(cad, ".obsidian", "plugins", "folders2graph", "main.js"))
+    # Aucun secret embarqué (défensif).
+    for f in glob.glob(os.path.join(cad, ".obsidian", "**", "*.json"), recursive=True):
+        txt = _read_text(f)
+        assert "apiKey" not in txt and "PRIVATE KEY" not in txt
+
+
+def test_deploy_vault_template_idempotent(tmp_path):
+    from effortless_mcp import server
+    root = str(tmp_path)
+    cad = os.path.join(root, "cadrage")
+    os.makedirs(cad)
+    with open(os.path.join(cad, "6-Suivi.base"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("CUSTOM")
+    server._deploy_cadrage_vault_template(root)
+    assert _read_text(os.path.join(cad, "6-Suivi.base")) == "CUSTOM"   # jamais écrasé

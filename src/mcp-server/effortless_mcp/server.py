@@ -289,6 +289,32 @@ def _ensure_gitignore_block(root: str) -> None:
         f.write(new)
 
 
+def _deploy_cadrage_vault_template(root: str) -> int:
+    """Déploie le template Obsidian curé dans <root>/cadrage/ (EVO-008/EVO-013).
+
+    Contenu : config JSON (app/appearance/core-plugins/graph colorisé/community-plugins),
+    sous-ensemble de plugins vendus (folders2graph, colored-tags, front-matter-title) et
+    dashboards 6-Suivi.base / 6-Suivi-stats.md. Sans secret ni binaire lourd. Copie
+    idempotente : ne réécrit jamais un fichier existant. Retourne le nombre de fichiers copiés.
+    """
+    import shutil
+    src_tmpl = os.path.join(os.path.dirname(__file__), "templates", "cadrage_vault")
+    if not os.path.isdir(src_tmpl):
+        return 0
+    dst_root = os.path.join(root, "cadrage")
+    copied = 0
+    for dirpath, _dirs, files in os.walk(src_tmpl):
+        rel = os.path.relpath(dirpath, src_tmpl)
+        target_dir = dst_root if rel == "." else os.path.join(dst_root, rel)
+        os.makedirs(target_dir, exist_ok=True)
+        for fn in files:
+            d = os.path.join(target_dir, fn)
+            if not os.path.exists(d):  # idempotent : jamais d'écrasement
+                shutil.copy2(os.path.join(dirpath, fn), d)
+                copied += 1
+    return copied
+
+
 @mcp.tool()
 def effortless_init(
     project_name: Optional[str] = None,
@@ -403,6 +429,9 @@ def effortless_init(
         root, "EPIC-PROJET", "STO-PROJET-01",
         phase_docs_from_workflow(config.model_dump()),
     )
+
+    # Vault Obsidian curé (config + plugins vendus + dashboards de suivi), EVO-008/013.
+    _deploy_cadrage_vault_template(root)
 
     phase_ids = " → ".join(p.id for p in config.workflow.phases)
     if resolved_mode == "v-cycle":

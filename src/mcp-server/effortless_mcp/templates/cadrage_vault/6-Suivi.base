@@ -1,0 +1,83 @@
+filters:
+  and:
+    - note.type.contains("cadrage")
+formulas:
+  Etat: if(statut == "Validé", "🟢 Validé", if(statut == "Rédigé", "🔵 Rédigé", if(statut == "En cours", "🟡 En cours", if(statut == "À rédiger", "⚪ À rédiger", if(statut == "vivant", "🌱 vivant", if(statut == "figé", "🧊 figé", if(statut == "versionné", "📌 versionné", statut)))))))
+  Genre: if(type.contains("story"), "📄 Story", if(type.contains("bqo"), "❓ BQO", if(type.contains("registre"), "🗂 Registre", if(type.contains("epic"), "📗 Epic", if(type.contains("projet"), "📘 Projet", "📁 " + type)))))
+properties:
+  formula.Etat:
+    displayName: État
+  formula.Genre:
+    displayName: Genre
+  note.statut:
+    displayName: Statut
+  note.phase:
+    displayName: Phase
+  note.epic:
+    displayName: Epic
+  note.story:
+    displayName: Story
+  note.code:
+    displayName: Code
+  note.type:
+    displayName: Type
+views:
+  - type: table
+    name: Stories — par phase
+    filters:
+      and:
+        - note.type == "cadrage-story"
+    order:
+      - epic
+      - story
+      - phase
+      - code
+      - formula.Etat
+    sort:
+      - property: epic
+        direction: ASC
+      - property: story
+        direction: ASC
+      - property: phase
+        direction: ASC
+    columnSize:
+      note.code: 98
+  - type: table
+    name: Suivi statut
+    filters:
+      and:
+        - note.type == "cadrage-story"
+    order:
+      - formula.Etat
+      - epic
+      - story
+      - phase
+      - file.name
+    sort:
+      - property: statut
+        direction: ASC
+      - property: epic
+        direction: ASC
+  - type: table
+    name: Epics & Projet
+    filters:
+      and:
+        - note.type != "cadrage-story"
+    order:
+      - formula.Genre
+      - epic
+      - formula.Etat
+      - file.name
+    sort:
+      - property: epic
+        direction: ASC
+      - property: formula.Genre
+        direction: ASC
+      - property: file.name
+        direction: ASC
+      - property: type
+        direction: ASC
+    columnSize:
+      formula.Genre: 121
+      note.epic: 202
+      formula.Etat: 135

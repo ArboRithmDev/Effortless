@@ -64,6 +64,7 @@ def story_doc_frontmatter(
     document = os.path.splitext(basename)[0]
     lines = [
         "---",
+        f"titre: {_title_from_basename(basename)}",
         f"phase: {phase}",
         f"statut: {statut}",
         "type: cadrage-story",
@@ -111,6 +112,38 @@ def scaffold_story_docs(
             f.write(text)
         created.append(os.path.relpath(path, root))
     return created
+
+
+def backfill_titre(root: str, documents_root: str = "cadrage") -> List[str]:
+    """Ajoute ``titre`` au frontmatter des docs de cadrage story existants qui n'en ont
+    pas (EVO-014, noms de nœuds lisibles). Idempotent : un doc ayant déjà ``titre`` est
+    ignoré ; les non-story et la config ``.obsidian`` sont ignorés. Retourne les chemins
+    relatifs modifiés.
+    """
+    import re
+    changed: List[str] = []
+    base = os.path.join(root, documents_root)
+    for dirpath, _dirs, files in os.walk(base):
+        if ".obsidian" in dirpath.split(os.sep):
+            continue
+        for fn in files:
+            if not fn.endswith(".md"):
+                continue
+            path = os.path.join(dirpath, fn)
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+            if not m:
+                continue
+            fm = m.group(1)
+            if "type: cadrage-story" not in fm or re.search(r"^titre:", fm, re.M):
+                continue
+            new_fm = f"titre: {_title_from_basename(fn)}\n" + fm
+            text = text.replace(m.group(1), new_fm, 1)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            changed.append(os.path.relpath(path, root))
+    return changed
 
 
 def phase_docs_from_workflow(config_data: dict) -> List[Tuple[str, str]]:

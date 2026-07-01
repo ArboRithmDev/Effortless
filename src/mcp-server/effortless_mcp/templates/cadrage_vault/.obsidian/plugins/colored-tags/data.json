@@ -1,0 +1,44 @@
+{
+  "palette": {
+    "seed": 0,
+    "selected": "adaptive-soft",
+    "custom": "e12729-f37324-f8cc1b-72b043-007f4e"
+  },
+  "mixColors": true,
+  "transition": true,
+  "accessibility": {
+    "highTextContrast": false
+  },
+  "knownTags": {
+    "cadrage": 1,
+    "dashboard": 2,
+    "suivi": 3,
+    "cadrage/001-epic-projet": 1,
+    "cadrage/002-epic-tracker": 2,
+    "cadrage/003-epic-cadrage": 3,
+    "cadrage/004-epic-process": 22,
+    "cadrage/005-epic-obsidian": 23,
+    "cadrage/006-epic-webui": 24,
+    "cadrage/007-epic-nomenclature": 25,
+    "cadrage/backlog": 4,
+    "cadrage/bqo": 5,
+    "cadrage/epic": 6,
+    "cadrage/evolutions": 7,
+    "cadrage/fnc-glo": 8,
+    "cadrage/fnc-spe": 9,
+    "cadrage/fonctionnel": 10,
+    "cadrage/met-dec": 11,
+    "cadrage/met-pln": 12,
+    "cadrage/mvp": 13,
+    "cadrage/projet": 14,
+    "cadrage/questions": 15,
+    "cadrage/registre": 16,
+    "cadrage/story": 17,
+    "cadrage/tec-ana": 18,
+    "cadrage/tec-api": 19,
+    "cadrage/tec-arc": 20,
+    "cadrage/technique": 21
+  },
+  "tagColors": {},
+  "_version": 4
+}

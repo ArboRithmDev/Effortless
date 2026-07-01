@@ -1,0 +1,11 @@
+{
+	"id": "folders2graph",
+	"name": "Folders to Graph",
+	"description": "Enhance your Obsidian graph view with folders and headings structure!",
+	"version": "1.2.0",
+	"author": "ratibus11",
+	"authorUrl": "https://github.com/ratibus11",
+	"fundingUrl": "https://ko-fi.com/ratibus11",
+	"minAppVersion": "1.4.16",
+	"isDesktopOnly": false
+}
