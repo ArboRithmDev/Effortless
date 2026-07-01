@@ -450,8 +450,13 @@ def effortless_story_start(
             f"Allowed: {', '.join(p['id'] for p in phases_list)}."
         )
 
-    # ID séquentiel PAR Epic : STO-<ZONE>-NN.
-    story_id = new_story_id(root, target_epic_id, resolved_zone)
+    # ID séquentiel PAR Epic, nouvelle forme : <NNN>-Story-<Périmètre>.
+    from effortless_mcp.services.nomenclature import (
+        format_story_id, perimetre_of, next_story_seq,
+    )
+    story_perimetre = perimetre_of(resolved_zone, target_epic_id)
+    story_seq = next_story_seq(root, target_epic_id)
+    story_id = format_story_id(story_seq, story_perimetre)
 
     story = Story(
         id=story_id,
@@ -462,6 +467,7 @@ def effortless_story_start(
         status="Doing" if activate else "Todo",
         depends_on=depends_on or [],
     ).model_dump()
+    story["seq"] = story_seq
 
     # Scaffolding fractal : fiche story.json + sous-registres tasks/decisions/questions.
     story_paths = get_story_paths(root, target_epic_id, story_id)
@@ -535,14 +541,19 @@ def effortless_epic_start(zone: str, title: str, description: str = "", activate
         return "Error: title requis."
 
     from effortless_mcp.models.epic import Epic
-    epic_id = new_epic_id(z)
+    from effortless_mcp.services.nomenclature import (
+        format_epic_id, perimetre_of, next_epic_seq, epic_with_perimetre_exists,
+    )
+    perimetre = perimetre_of(z, "")
+    existing = epic_with_perimetre_exists(root, perimetre)
+    if existing:
+        return f"Epic de périmètre '{perimetre}' existe déjà ('{existing}', idempotent, non écrasé)."
+    seq = next_epic_seq(root)
+    epic_id = format_epic_id(seq, perimetre)
     epic_dir = get_epic_dir(root, epic_id)
-    epic_file = os.path.join(epic_dir, "epic.json")
-    if os.path.exists(epic_file):
-        return f"Epic '{epic_id}' existe déjà (idempotent, non écrasé)."
-
     os.makedirs(os.path.join(epic_dir, "stories"), exist_ok=True)
     epic = Epic(id=epic_id, zone=z, title=title, description=description or None).model_dump()
+    epic["seq"] = seq
     epic["stories"] = []
     save_entity(epic_dir, "epic", epic)
     # Dossier de cadrage epic-scopé.

@@ -58,6 +58,45 @@ def _read_json(path: str) -> dict:
         return json.load(f)
 
 
+def next_epic_seq(root: str) -> int:
+    """Prochaine séquence de création d'Epic : max(seq existants) + 1."""
+    epics_dir = os.path.join(root, ".effortless", "epics")
+    seqs = []
+    if os.path.isdir(epics_dir):
+        for name in os.listdir(epics_dir):
+            ejson = os.path.join(epics_dir, name, "epic.json")
+            if os.path.isfile(ejson):
+                s = _read_json(ejson).get("seq")
+                seqs.append(s if isinstance(s, int) else 0)
+    return (max(seqs) if seqs else 0) + 1
+
+
+def next_story_seq(root: str, epic_id: str) -> int:
+    """Prochaine séquence de création de Story au sein d'un Epic : max(seq) + 1."""
+    stories_dir = os.path.join(root, ".effortless", "epics", epic_id, "stories")
+    seqs = []
+    if os.path.isdir(stories_dir):
+        for name in os.listdir(stories_dir):
+            sjson = os.path.join(stories_dir, name, "story.json")
+            if os.path.isfile(sjson):
+                s = _read_json(sjson).get("seq")
+                seqs.append(s if isinstance(s, int) else 0)
+    return (max(seqs) if seqs else 0) + 1
+
+
+def epic_with_perimetre_exists(root: str, perimetre: str) -> Optional[str]:
+    """Retourne l'id de l'Epic ayant déjà ce périmètre, sinon None (garde anti-doublon)."""
+    epics_dir = os.path.join(root, ".effortless", "epics")
+    if os.path.isdir(epics_dir):
+        for name in os.listdir(epics_dir):
+            ejson = os.path.join(epics_dir, name, "epic.json")
+            if os.path.isfile(ejson):
+                e = _read_json(ejson)
+                if perimetre_of(e.get("zone"), e.get("id", name)) == perimetre:
+                    return e.get("id", name)
+    return None
+
+
 def _write_json(path: str, data: dict) -> None:
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

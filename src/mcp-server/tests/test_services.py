@@ -1413,36 +1413,32 @@ def test_story_start_scaffolds_and_activates_new_story(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
 
-        msg = server.effortless_story_start("Deuxième story")
-        # ID séquentiel par Epic, sous l'Epic actif (EPIC-PROJET).
-        assert "STO-PROJET-02" in msg
+        server.effortless_story_start("Deuxième story")
+        # Nouvelle forme : <NNN>-Story-Projet sous l'Epic actif (EPIC-PROJET).
+        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        sid = state["active_story_id"]
+        eid = state["active_epic_id"]
+        assert sid.endswith("-Story-Projet") and sid[:3].isdigit()
 
         # Arbre fractal scaffoldé : fiche + sous-registres.
-        sdir = os.path.join(
-            tmpdir, ".effortless", "epics", "EPIC-PROJET", "stories", "STO-PROJET-02"
-        )
+        sdir = os.path.join(tmpdir, ".effortless", "epics", eid, "stories", sid)
         for sub in ("story.json", "tasks", "decisions", "questions"):
             assert os.path.exists(os.path.join(sdir, sub))
         # Dossier de cadrage story-scopé.
-        assert os.path.isdir(os.path.join(tmpdir, "cadrage", "EPIC-PROJET", "STO-PROJET-02"))
+        assert os.path.isdir(os.path.join(tmpdir, "cadrage", eid, sid))
 
-        # Story démarre sur la 1re phase OPALE, statut Doing.
+        # Story démarre sur la 1re phase OPALE, statut Doing, avec seq.
         with open(os.path.join(sdir, "story.json"), encoding="utf-8") as f:
             story = json.load(f)
         assert story["opale_phase"] == "O-analyse"
         assert story["status"] == "Doing"
-        assert story["epic_id"] == "EPIC-PROJET" and story["zone"] == "PROJET"
+        assert story["epic_id"] == eid and story["zone"] == "PROJET" and isinstance(story["seq"], int)
 
         # Référencée dans epic.json (dédup), pas de doublon.
-        with open(os.path.join(tmpdir, ".effortless", "epics", "EPIC-PROJET", "epic.json"), encoding="utf-8") as f:
+        with open(os.path.join(tmpdir, ".effortless", "epics", eid, "epic.json"), encoding="utf-8") as f:
             epic = json.load(f)
-        assert epic["stories"].count("STO-PROJET-02") == 1
-
-        # Story active basculée.
-        with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
-            state = json.load(f)
-        assert state["active_story_id"] == "STO-PROJET-02"
-        assert state["active_epic_id"] == "EPIC-PROJET"
+        assert epic["stories"].count(sid) == 1
 
         # La phase faisant autorité suit la nouvelle Story active.
         assert server.resolve_active_phase(tmpdir) == "O-analyse"
@@ -2175,15 +2171,18 @@ def test_epic_start_creates_and_activates(monkeypatch):
         monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
         server.effortless_init("P", "d")
         out = server.effortless_epic_start("BILLING", "Facturation")
-        assert "EPIC-BILLING créé" in out
-        epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "epic.json")
-        assert os.path.exists(epic_file)
+        assert "créé" in out
+        st = _state(tmpdir)
+        eid = st["active_epic_id"]
+        # Nouvelle forme : <NNN>-Epic-Billing.
+        assert eid.endswith("-Epic-Billing") and eid[:3].isdigit()
+        assert st["active_story_id"] is None
+        epic_file = os.path.join(tmpdir, ".effortless", "epics", eid, "epic.json")
         with open(epic_file, encoding="utf-8") as f:
             e = json.load(f)
-        assert e["zone"] == "BILLING" and e["status"] == "Open" and e["stories"] == []
-        st = _state(tmpdir)
-        assert st["active_epic_id"] == "EPIC-BILLING" and st["active_story_id"] is None
-        # Idempotent : pas d'écrasement.
+        assert e["id"] == eid and e["zone"] == "BILLING" and e["status"] == "Open"
+        assert e["stories"] == [] and isinstance(e["seq"], int)
+        # Garde périmètre : un 2e Epic de même périmètre est refusé.
         assert "existe déjà" in server.effortless_epic_start("BILLING", "Autre")
 
 
@@ -2212,7 +2211,7 @@ def test_story_complete_requires_all_tasks_done(monkeypatch):
         # Idempotent.
         assert "déjà Done" in server.effortless_story_complete()
         st = _state(tmpdir)
-        sp = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "stories",
+        sp = os.path.join(tmpdir, ".effortless", "epics", st["active_epic_id"], "stories",
                           st["active_story_id"], "story.json")
         with open(sp, encoding="utf-8") as f:
             assert json.load(f)["status"] == "Done"
@@ -2232,7 +2231,7 @@ def test_epic_complete_requires_all_stories_done(monkeypatch):
         assert "clôturée" in server.effortless_story_complete()
         assert "clôturé" in server.effortless_epic_complete()
         assert "déjà Done" in server.effortless_epic_complete()
-        epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "epic.json")
+        epic_file = os.path.join(tmpdir, ".effortless", "epics", _state(tmpdir)["active_epic_id"], "epic.json")
         with open(epic_file, encoding="utf-8") as f:
             assert json.load(f)["status"] == "Done"
 
