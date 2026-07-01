@@ -2235,3 +2235,109 @@ def test_epic_complete_requires_all_stories_done(monkeypatch):
         epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "epic.json")
         with open(epic_file, encoding="utf-8") as f:
             assert json.load(f)["status"] == "Done"
+
+
+# --- Nomenclature <NNN>-Epic/Story-<Périmètre> — STO-CADRAGE-02 ----------------
+
+def _build_nomen_fixture(root):
+    import io
+    def wj(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    eff = os.path.join(root, ".effortless")
+    # EPIC-ALPHA (seq 1) : 2 stories ; EPIC-BETA (seq 2) : 1 story.
+    wj(os.path.join(eff, "epics", "EPIC-ALPHA", "epic.json"),
+       {"id": "EPIC-ALPHA", "zone": "ALPHA", "seq": 1, "status": "Open",
+        "stories": ["STO-ALPHA-01", "STO-ALPHA-02"]})
+    for sid in ("STO-ALPHA-01", "STO-ALPHA-02"):
+        wj(os.path.join(eff, "epics", "EPIC-ALPHA", "stories", sid, "story.json"),
+           {"id": sid, "epic_id": "EPIC-ALPHA", "zone": "ALPHA", "status": "Done"})
+    wj(os.path.join(eff, "epics", "EPIC-BETA", "epic.json"),
+       {"id": "EPIC-BETA", "zone": "BETA", "seq": 2, "status": "Open",
+        "stories": ["STO-BETA-01"]})
+    wj(os.path.join(eff, "epics", "EPIC-BETA", "stories", "STO-BETA-01", "story.json"),
+       {"id": "STO-BETA-01", "epic_id": "EPIC-BETA", "zone": "BETA", "status": "Doing"})
+    wj(os.path.join(eff, "state.json"),
+       {"active_epic_id": "EPIC-BETA", "active_story_id": "STO-BETA-01"})
+    wj(os.path.join(eff, "backlog.json"),
+       {"epics": [{"id": "EPIC-ALPHA"}, {"id": "EPIC-BETA"}, {"id": "EPIC-CORE"}]})
+    # Doc de cadrage avec frontmatter.
+    md = os.path.join(root, "cadrage", "EPIC-ALPHA", "STO-ALPHA-01", "00-FNC-GLO-x.md")
+    os.makedirs(os.path.dirname(md), exist_ok=True)
+    with io.open(md, "w", encoding="utf-8", newline="\n") as f:
+        f.write("---\ntype: cadrage-story\nepic: EPIC-ALPHA\nstory: STO-ALPHA-01\n"
+                "tags:\n  - cadrage/epic-alpha\n---\n\n# Doc\n")
+
+
+def test_nomenclature_plan_maps_ids(tmp_path):
+    from effortless_mcp.services.nomenclature import plan_nomenclature
+    _build_nomen_fixture(str(tmp_path))
+    plan = plan_nomenclature(str(tmp_path))
+    assert plan["changed"] is True
+    by_old = {e["old_id"]: e for e in plan["epics"]}
+    assert by_old["EPIC-ALPHA"]["new_id"] == "001-Epic-Alpha"
+    assert by_old["EPIC-BETA"]["new_id"] == "002-Epic-Beta"
+    alpha_stories = {s["old_id"]: s["new_id"] for s in by_old["EPIC-ALPHA"]["stories"]}
+    assert alpha_stories == {"STO-ALPHA-01": "001-Story-Alpha", "STO-ALPHA-02": "002-Story-Alpha"}
+    assert by_old["EPIC-BETA"]["stories"][0]["new_id"] == "001-Story-Beta"
+
+
+def test_nomenclature_apply_renames_and_rewrites(tmp_path):
+    import io
+    from effortless_mcp.services.nomenclature import apply_nomenclature, plan_nomenclature
+    root = str(tmp_path)
+    _build_nomen_fixture(root)
+    report = apply_nomenclature(root, plan_nomenclature(root))
+    assert report["epics_renamed"] == 2 and report["stories_renamed"] == 3
+    eff = os.path.join(root, ".effortless")
+    # Répertoires renommés.
+    assert os.path.isdir(os.path.join(eff, "epics", "002-Epic-Beta", "stories", "001-Story-Beta"))
+    assert not os.path.exists(os.path.join(eff, "epics", "EPIC-BETA"))
+    # epic.json réécrit (id + stories[]).
+    with io.open(os.path.join(eff, "epics", "001-Epic-Alpha", "epic.json"), encoding="utf-8") as f:
+        e = json.load(f)
+    assert e["id"] == "001-Epic-Alpha" and e["stories"] == ["001-Story-Alpha", "002-Story-Alpha"]
+    # story.json réécrit (id + epic_id).
+    with io.open(os.path.join(eff, "epics", "002-Epic-Beta", "stories", "001-Story-Beta", "story.json"), encoding="utf-8") as f:
+        s = json.load(f)
+    assert s["id"] == "001-Story-Beta" and s["epic_id"] == "002-Epic-Beta"
+    # state actif réécrit.
+    with io.open(os.path.join(eff, "state.json"), encoding="utf-8") as f:
+        st = json.load(f)
+    assert st["active_epic_id"] == "002-Epic-Beta" and st["active_story_id"] == "001-Story-Beta"
+    # backlog : ids réels mappés, logique EPIC-CORE intact.
+    with io.open(os.path.join(eff, "backlog.json"), encoding="utf-8") as f:
+        ids = [x["id"] for x in json.load(f)["epics"]]
+    assert ids == ["001-Epic-Alpha", "002-Epic-Beta", "EPIC-CORE"]
+    # frontmatter réécrit.
+    with io.open(os.path.join(root, "cadrage", "001-Epic-Alpha", "001-Story-Alpha", "00-FNC-GLO-x.md"), encoding="utf-8") as f:
+        fm = f.read()
+    assert "epic: 001-Epic-Alpha" in fm and "story: 001-Story-Alpha" in fm
+    assert "cadrage/001-epic-alpha" in fm
+
+
+def test_nomenclature_idempotent(tmp_path):
+    from effortless_mcp.services.nomenclature import apply_nomenclature, plan_nomenclature
+    root = str(tmp_path)
+    _build_nomen_fixture(root)
+    apply_nomenclature(root, plan_nomenclature(root))
+    # 2e passe : plan sans changement, aucun renommage.
+    plan2 = plan_nomenclature(root)
+    assert plan2["changed"] is False
+    report2 = apply_nomenclature(root, plan2)
+    assert report2["epics_renamed"] == 0 and report2["stories_renamed"] == 0
+
+
+def test_migrate_nomenclature_tool_dry_run_then_apply(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    _build_nomen_fixture(str(tmp_path))  # ajoute des epics à migrer
+    dry = server.effortless_migrate_nomenclature()
+    assert "DRY-RUN" in dry and "EPIC-ALPHA" in dry and "001-Epic-Alpha" in dry
+    # Rien appliqué au dry-run.
+    assert os.path.isdir(os.path.join(str(tmp_path), ".effortless", "epics", "EPIC-ALPHA"))
+    out = server.effortless_migrate_nomenclature(confirm=True)
+    assert "migrée" in out
+    assert os.path.isdir(os.path.join(str(tmp_path), ".effortless", "epics", "001-Epic-Alpha"))

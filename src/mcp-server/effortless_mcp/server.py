@@ -640,6 +640,48 @@ def effortless_epic_complete(epic_id: Optional[str] = None) -> str:
 
 
 @mcp.tool()
+def effortless_migrate_nomenclature(confirm: bool = False) -> str:
+    """
+    Migre les identifiants fractals vers la forme <NNN>-Epic/Story-<Périmètre> (EVO-005).
+
+    `confirm=False` (défaut) : DRY-RUN — retourne le plan de renommage (old → new)
+    sans rien modifier. `confirm=True` : applique — renomme les répertoires
+    (.effortless/epics + cadrage) et réécrit toutes les références (epic.json,
+    story.json, state, backlog, frontmatter de cadrage). Idempotent : un arbre déjà
+    migré ne change rien. À faire précéder d'une sauvegarde.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    from effortless_mcp.services.nomenclature import plan_nomenclature, apply_nomenclature
+
+    plan = plan_nomenclature(root)
+    lines = []
+    for ep in plan["epics"]:
+        arrow = "=" if ep["old_id"] == ep["new_id"] else "→"
+        lines.append(f"  {ep['old_id']} {arrow} {ep['new_id']}")
+        for st in ep["stories"]:
+            sarrow = "=" if st["old_id"] == st["new_id"] else "→"
+            lines.append(f"      {st['old_id']} {sarrow} {st['new_id']}")
+    mapping = "\n".join(lines) or "  (aucun Epic)"
+
+    if not plan["changed"]:
+        return f"Nomenclature : déjà à jour (idempotent).\n{mapping}"
+    if not confirm:
+        return (
+            "DRY-RUN — plan de migration nomenclature (rien modifié) :\n"
+            f"{mapping}\n\nRelance avec confirm=True pour appliquer (sauvegarde recommandée)."
+        )
+    report = apply_nomenclature(root, plan)
+    return (
+        f"Nomenclature migrée : {report['epics_renamed']} Epic(s), "
+        f"{report['stories_renamed']} Story(ies) renommé(s).\n{mapping}\n"
+        f"⚠️ Reconnecte le MCP effortless."
+    )
+
+
+@mcp.tool()
 def effortless_status() -> str:
     """
     Retourne le statut actuel du projet, la checklist de phase et l'éligibilité pour la phase suivante.
