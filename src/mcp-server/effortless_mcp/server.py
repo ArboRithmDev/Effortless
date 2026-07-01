@@ -377,15 +377,19 @@ def effortless_init(
     with open(story_paths["story"], "w", encoding="utf-8") as f:
         json.dump(story, f, indent=2, ensure_ascii=False)
 
-    # Création du dossier de documents (story-scopé)
+    # Création du dossier de documents (story-scopé) + stubs Obsidian-ready.
     docs_dir = os.path.join(root, "cadrage", "EPIC-PROJET", "STO-PROJET-01")
     os.makedirs(docs_dir, exist_ok=True)
 
-    # Création d'un template de glossaire par défaut pour démarrer
-    glossary_path = os.path.join(docs_dir, "00-FNC-GLO-glossaire.md")
-    if not os.path.exists(glossary_path):
-        with open(glossary_path, "w", encoding="utf-8") as f:
-            f.write("---\nphase: O-analyse\nstatut: Active\n---\n\n# 📓 Domain Glossary\n\nDefine your domain terms here.\n")
+    # Scaffolde tous les docs de phase avec frontmatter riche (004-Story-Cadrage) :
+    # le projet fraîchement initialisé est immédiatement ouvrable dans Obsidian.
+    from effortless_mcp.services.cadrage_frontmatter import (
+        scaffold_story_docs, phase_docs_from_workflow,
+    )
+    scaffold_story_docs(
+        root, "EPIC-PROJET", "STO-PROJET-01",
+        phase_docs_from_workflow(config.model_dump()),
+    )
 
     return f"Project '{name}' successfully initialized under {root}."
 
@@ -480,6 +484,16 @@ def effortless_story_start(
     docs_dir = resolve_phase_docs_dir_nested(root, target_epic_id, story_id)
     os.makedirs(docs_dir, exist_ok=True)
 
+    # Stubs Obsidian-ready des docs de cadrage (004-Story-Cadrage) : frontmatter
+    # riche + titre, jamais d'écrasement. Rend chaque doc de phase présent dès la
+    # création de la Story.
+    from effortless_mcp.services.cadrage_frontmatter import (
+        scaffold_story_docs, phase_docs_from_workflow,
+    )
+    scaffold_story_docs(
+        root, target_epic_id, story_id, phase_docs_from_workflow(config_data)
+    )
+
     # Référencement dans epic.json (dédup).
     stories = epic_data.setdefault("stories", [])
     if story_id not in stories:
@@ -522,6 +536,54 @@ def effortless_story_start(
                 pass
 
     return f"Story {story_id} created under {target_epic_id} ('{title}').{activated_msg}"
+
+
+@mcp.tool()
+def effortless_cadrage_docs_scaffold(story_id: Optional[str] = None) -> str:
+    """
+    Backfille les stubs Obsidian-ready des docs de cadrage d'une Story (004-Story-Cadrage).
+
+    Dépose le frontmatter riche (type/projet/epic/story/code/tags) + titre pour chaque
+    doc de phase encore ABSENT ; ne réécrit jamais un doc existant. Utile pour rendre
+    conformes les Stories créées avant ce hook. Sans `story_id`, opère sur la Story active.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+
+    if story_id:
+        # Retrouve l'Epic parent en balayant les epics/<E>/stories/<story_id>.
+        epics_root = os.path.join(paths["storage"], "epics")
+        epic_id = None
+        if os.path.isdir(epics_root):
+            for e in os.listdir(epics_root):
+                if os.path.isdir(os.path.join(epics_root, e, "stories", story_id)):
+                    epic_id = e
+                    break
+        if not epic_id:
+            return f"Error: story '{story_id}' introuvable."
+        target_epic_id, target_story_id = epic_id, story_id
+    else:
+        story = get_active_story(root)
+        if story is None:
+            return "Error: aucune Story active (passe story_id)."
+        target_epic_id, target_story_id = story["epic_id"], story["id"]
+
+    from effortless_mcp.services.cadrage_frontmatter import (
+        scaffold_story_docs, phase_docs_from_workflow,
+    )
+    created = scaffold_story_docs(
+        root, target_epic_id, target_story_id, phase_docs_from_workflow(config_data)
+    )
+    if not created:
+        return f"Story {target_story_id} : docs de cadrage déjà tous présents (no-op)."
+    return (
+        f"Story {target_story_id} : {len(created)} stub(s) de cadrage scaffoldé(s) "
+        f"(frontmatter Obsidian) :\n- " + "\n- ".join(created)
+    )
 
 
 @mcp.tool()

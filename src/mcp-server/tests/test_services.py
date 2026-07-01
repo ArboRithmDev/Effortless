@@ -2413,3 +2413,92 @@ def test_epic_start_scaffolds_epic_cadrage(monkeypatch, tmp_path):
     sid = _state(str(tmp_path))["active_story_id"]
     with open(os.path.join(str(tmp_path), "cadrage", eid, "1-Stories.md"), encoding="utf-8") as f:
         assert sid in f.read()
+
+
+def test_parse_doc_code_uppercase_run():
+    from effortless_mcp.services.cadrage_frontmatter import parse_doc_code
+    assert parse_doc_code("05-FNC-SPE-specifications.md") == "FNC-SPE"
+    assert parse_doc_code("02-BQO-questions.md") == "BQO"
+    assert parse_doc_code("07-MET-PLN-plan-action.md") == "MET-PLN"
+    assert parse_doc_code("00-FNC-GLO-glossaire") == "FNC-GLO"
+
+
+def test_story_doc_frontmatter_schema():
+    from effortless_mcp.services.cadrage_frontmatter import story_doc_frontmatter
+    fm = story_doc_frontmatter("003-Epic-Cadrage", "004-Story-Cadrage",
+                               "05-FNC-SPE-specifications.md", "A-specs")
+    assert "type: cadrage-story" in fm
+    assert "epic: 003-Epic-Cadrage" in fm and "story: 004-Story-Cadrage" in fm
+    assert "code: FNC-SPE" in fm and "phase: A-specs" in fm
+    assert "  - cadrage/003-epic-cadrage" in fm and "  - cadrage/fnc-spe" in fm
+
+
+def test_scaffold_story_docs_creates_missing_never_overwrites(tmp_path):
+    from effortless_mcp.services.cadrage_frontmatter import scaffold_story_docs
+    root = str(tmp_path)
+    eid, sid = "003-Epic-Cadrage", "004-Story-Cadrage"
+    docs = [("O-analyse", "00-FNC-GLO-glossaire.md"), ("A-specs", "05-FNC-SPE-specifications.md")]
+    created = scaffold_story_docs(root, eid, sid, docs)
+    assert len(created) == 2
+    glo = os.path.join(root, "cadrage", eid, sid, "00-FNC-GLO-glossaire.md")
+    with open(glo, encoding="utf-8") as f:
+        assert "type: cadrage-story" in f.read()
+    # Édition auteur préservée : re-scaffold n'écrase pas, n'en recrée aucun.
+    with open(glo, "w", encoding="utf-8") as f:
+        f.write("EDITÉ")
+    again = scaffold_story_docs(root, eid, sid, docs)
+    assert again == []
+    with open(glo, encoding="utf-8") as f:
+        assert f.read() == "EDITÉ"
+
+
+def test_phase_docs_from_workflow_flattens():
+    from effortless_mcp.services.cadrage_frontmatter import phase_docs_from_workflow
+    cfg = {"workflow": {"phases": [
+        {"id": "O-analyse", "required_documents": ["cadrage/E/S/00-FNC-GLO-glossaire.md"]},
+        {"id": "L-plan", "required_documents": ["cadrage/E/S/07-MET-PLN-plan-action.md"]},
+    ]}}
+    pairs = phase_docs_from_workflow(cfg)
+    assert pairs == [("O-analyse", "00-FNC-GLO-glossaire.md"), ("L-plan", "07-MET-PLN-plan-action.md")]
+
+
+def test_init_scaffolds_obsidian_ready_docs(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    base = os.path.join(str(tmp_path), "cadrage", "EPIC-PROJET", "STO-PROJET-01")
+    glo = os.path.join(base, "00-FNC-GLO-glossaire.md")
+    pln = os.path.join(base, "07-MET-PLN-plan-action.md")
+    assert os.path.exists(glo) and os.path.exists(pln)
+    with open(glo, encoding="utf-8") as f:
+        txt = f.read()
+    assert "type: cadrage-story" in txt and "code: FNC-GLO" in txt and "phase: O-analyse" in txt
+
+
+def test_story_start_scaffolds_obsidian_docs(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    server.effortless_epic_start("BILLING", "Facturation")
+    server.effortless_story_start("Story facture")
+    st = _state(str(tmp_path))
+    eid, sid = st["active_epic_id"], st["active_story_id"]
+    spe = os.path.join(str(tmp_path), "cadrage", eid, sid, "05-FNC-SPE-specifications.md")
+    assert os.path.exists(spe)
+    with open(spe, encoding="utf-8") as f:
+        assert f"story: {sid}" in f.read()
+
+
+def test_cadrage_docs_scaffold_backfills_active_story(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    st = _state(str(tmp_path))
+    eid, sid = st["active_epic_id"], st["active_story_id"]
+    # Supprime un doc scaffoldé pour simuler une Story pré-hook incomplète.
+    glo = os.path.join(str(tmp_path), "cadrage", eid, sid, "00-FNC-GLO-glossaire.md")
+    os.remove(glo)
+    out = server.effortless_cadrage_docs_scaffold()
+    assert "00-FNC-GLO-glossaire" in out and os.path.exists(glo)
+    # Idempotent : second appel = no-op.
+    assert "no-op" in server.effortless_cadrage_docs_scaffold()
