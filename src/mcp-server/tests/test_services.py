@@ -1586,7 +1586,13 @@ def test_tracker_tools_queue_flow(monkeypatch):
         couple = server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
         assert "couplé" in couple and "Rovo" in couple
 
-        out = server.effortless_tracker_scaffold("PROJET")
+        # Garde d'idempotence : sans confirm_absent, aucun enqueue (STO-TRACKER-12).
+        guard = server.effortless_tracker_scaffold("PROJET")
+        assert "Garde d'idempotence" in guard and "confirm_absent=True" in guard
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+        # Absence confirmée par l'agent → enqueue.
+        out = server.effortless_tracker_scaffold("PROJET", confirm_absent=True)
         assert "6 op(s) en attente" in out
 
         pend = server.effortless_tracker_pending()
@@ -1668,7 +1674,7 @@ def test_scaffold_ops_carry_issue_type_id_after_discover(monkeypatch):
         server.effortless_init("P", "d")
         server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
         server.effortless_tracker_discover_ack(_json.dumps({"epic": "10000", "story": "10007", "task": "10095"}))
-        server.effortless_tracker_scaffold("PROJET")
+        server.effortless_tracker_scaffold("PROJET", confirm_absent=True)
         data = _json.loads(server.effortless_tracker_pending().split("\n\n", 1)[1])["pending"]
         by_type = {op["issue_type_name"]: op["issue_type_id"] for op in data}
         assert by_type["Epic"] == "10000" and by_type["Story"] == "10007" and by_type["Sous-tâche"] == "10095"
@@ -1926,6 +1932,20 @@ def test_rescaffold_idempotent_after_import(monkeypatch):
         out = server.effortless_tracker_scaffold("PROJET")
         assert "déjà scaffoldée" in out
         assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_scaffold_guard_blocks_duplicate_without_confirm(monkeypatch):
+    # STO-TRACKER-12 : sans ScaffoldState local ni confirm_absent, scaffold n'enqueue
+    # RIEN et exige la vérification d'absence Jira (label) — évite les arbres dupliqués.
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        guard = server.effortless_tracker_scaffold("PROJET")
+        assert 'labels = "effortless-scaffold:PROJET"' in guard
+        assert "import_ack" in guard and "confirm_absent=True" in guard
+        assert "Aucune opération" in server.effortless_tracker_pending()  # zéro enqueue
 
 
 def test_import_ack_rejects_bad_input(monkeypatch):

@@ -1398,12 +1398,24 @@ def effortless_tracker_couple(type: str, project_id: str, project_url: str) -> s
 
 
 @mcp.tool()
-def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira_project_scaffold") -> str:
+def effortless_tracker_scaffold(
+    zone: str = "PROJET",
+    template_name: str = "jira_project_scaffold",
+    confirm_absent: bool = False,
+) -> str:
     """
     Scaffolde l'arbre du template (défaut : [PROJET]) dans le projet tracker couplé.
 
-    Idempotent (DEC-05) : un re-run sur une zone déjà scaffoldée ne recrée rien.
-    Sans couplage (NullTracker), opération no-op (refs vides).
+    Idempotence Jira-as-truth (STO-TRACKER-12) : le `ScaffoldState` local
+    (`.effortless/`, gitignoré) peut être perdu entre sessions — s'y fier seul a
+    produit 3 arbres [PROJET] dupliqués. Garde à deux temps :
+      1. `confirm_absent=False` (défaut) → N'ENQUEUE RIEN. Renvoie la JQL de garde ;
+         l'agent vérifie l'absence du root sur Jira (label). Si des issues existent →
+         `effortless_tracker_import_ack` (reconcile, NE PAS créer). Sinon relancer avec
+         `confirm_absent=True`.
+      2. `confirm_absent=True` (absence vérifiée par l'agent) → enqueue les créations.
+    Fast-path : zone déjà connue localement (ScaffoldState) → no-op immédiat.
+    Sans couplage (NullTracker) → no-op.
     """
     root = get_project_root()
     paths = get_paths(root)
@@ -1427,23 +1439,40 @@ def effortless_tracker_scaffold(zone: str = "PROJET", template_name: str = "jira
     except OSError as e:
         return f"Error: template '{template_name}' introuvable ({e})."
 
+    # Sans couplage : no-op sûr, aucune projection, aucun enqueue.
+    if isinstance(tracker, NullTracker):
+        return "Projet non couplé : aucune projection (no-op)."
+
     state = ScaffoldState(root)
-    already = state.has(zone)
+    # Fast-path : identité de zone déjà connue localement → rien à recréer.
+    if state.has(zone):
+        return (
+            f"{ROVO_DISCLAIMER}\n\n"
+            f"Zone '{zone}' déjà scaffoldée ({len(state.get(zone))} refs connues). "
+            f"Rien à exécuter (idempotent)."
+        )
+
+    # Garde Jira-as-truth : sans confirmation d'absence, on N'ENQUEUE RIEN.
+    label = f"effortless-scaffold:{zone}"
+    if not confirm_absent:
+        return (
+            f"{ROVO_DISCLAIMER}\n\n"
+            f"⚠️ Garde d'idempotence : vérifie d'abord que la zone '{zone}' n'existe pas sur Jira.\n"
+            f"1. Agent → searchJiraIssuesUsingJql : `labels = \"{label}\"`.\n"
+            f"2. Si des issues existent → effortless_tracker_import_ack('{zone}', tree_json) "
+            f"(reconcile Jira-as-truth, NE PAS créer).\n"
+            f"3. Si AUCUNE issue → relance effortless_tracker_scaffold('{zone}', confirm_absent=True) "
+            f"pour enqueue les créations."
+        )
+
+    # Absence confirmée par l'agent : on enqueue l'arbre.
     try:
         refs = scaffold_project_from_template(tracker, project_ref, template, zone, state)
     except Exception as e:
         return f"Error during scaffold: {e}"
-
-    if isinstance(tracker, NullTracker):
-        return f"Projet non couplé : aucune projection (no-op). {len(refs)} nœud(s) ignorés."
-    if already:
-        return (
-            f"{ROVO_DISCLAIMER}\n\n"
-            f"Zone '{zone}' déjà scaffoldée ({len(refs)} refs connues). Rien à exécuter (idempotent)."
-        )
     return (
         f"{ROVO_DISCLAIMER}\n\n"
-        f"Scaffold '{zone}' planifié : {len(refs)} op(s) en attente. "
+        f"Scaffold '{zone}' planifié (absence confirmée) : {len(refs)} op(s) en attente. "
         f"Exécute via effortless_tracker_pending (Rovo), puis effortless_tracker_ack."
     )
 
