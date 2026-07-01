@@ -513,6 +513,132 @@ def effortless_story_start(
 
     return f"Story {story_id} created under {target_epic_id} ('{title}').{activated_msg}"
 
+
+@mcp.tool()
+def effortless_epic_start(zone: str, title: str, description: str = "", activate: bool = True) -> str:
+    """
+    Crée un nouvel Epic (EPIC-<ZONE>) et, par défaut, l'active.
+
+    Comble le gap de bootstrap (EVO-003) : `effortless_init` ne crée que le premier
+    Epic et `effortless_story_start` exige un Epic existant — rien ne permettait
+    d'amorcer un Epic N+1. Idempotent : un Epic déjà présent n'est pas écrasé.
+    Une Epic fraîche n'a pas de Story ; ajouter via effortless_story_start.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]) or not os.path.exists(paths["state"]):
+        return "Error: Project not initialized."
+    z = (zone or "").strip().upper()
+    if not z:
+        return "Error: zone requise."
+    if not (title or "").strip():
+        return "Error: title requis."
+
+    from effortless_mcp.models.epic import Epic
+    epic_id = new_epic_id(z)
+    epic_dir = get_epic_dir(root, epic_id)
+    epic_file = os.path.join(epic_dir, "epic.json")
+    if os.path.exists(epic_file):
+        return f"Epic '{epic_id}' existe déjà (idempotent, non écrasé)."
+
+    os.makedirs(os.path.join(epic_dir, "stories"), exist_ok=True)
+    epic = Epic(id=epic_id, zone=z, title=title, description=description or None).model_dump()
+    epic["stories"] = []
+    save_entity(epic_dir, "epic", epic)
+    # Dossier de cadrage epic-scopé.
+    os.makedirs(os.path.join(root, "cadrage", epic_id), exist_ok=True)
+
+    activated = ""
+    if activate:
+        with open(paths["state"], "r", encoding="utf-8") as f:
+            state_data = json.load(f)
+        state_data["active_epic_id"] = epic_id
+        state_data["active_story_id"] = None  # Epic vide : pas de Story active tant qu'aucune n'est amorcée.
+        with open(paths["state"], "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
+        activated = f" Epic actif = {epic_id} (ajoute une Story via effortless_story_start)."
+    return f"Epic {epic_id} créé ('{title}').{activated}"
+
+
+@mcp.tool()
+def effortless_story_complete(story_id: Optional[str] = None) -> str:
+    """
+    Passe une Story à 'Done' si toutes ses tâches sont 'Done'.
+
+    Story active par défaut (ou `story_id` sous l'Epic actif). Ferme le gap de clôture
+    (EVO-003) : les Stories restaient 'Doing' après livraison du code. Idempotent :
+    une Story déjà Done est un no-op. Refuse si des tâches ne sont pas Done.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["state"]):
+        return "Error: Project not initialized."
+    with open(paths["state"], "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    epic_id = state_data.get("active_epic_id")
+    sid = story_id or state_data.get("active_story_id")
+    if not epic_id or not sid:
+        return "Error: no target story (pass story_id or activate one)."
+    sp = get_story_paths(root, epic_id, sid)
+    if not os.path.exists(sp["story"]):
+        return f"Error: story '{sid}' not found under {epic_id}."
+    with open(sp["story"], "r", encoding="utf-8") as f:
+        story = json.load(f)
+    if story.get("status") == "Done":
+        return f"Story '{sid}' déjà Done (idempotent)."
+    tasks = load_entities(sp["tasks"])
+    pending = [t.get("id") for t in tasks if t.get("status") != "Done"]
+    if pending:
+        return f"Error: story '{sid}' a {len(pending)} tâche(s) non Done : {', '.join(pending)}."
+    story["status"] = "Done"
+    save_entity(sp["dir"], "story", story)
+    return f"Story '{sid}' clôturée (Done)."
+
+
+@mcp.tool()
+def effortless_epic_complete(epic_id: Optional[str] = None) -> str:
+    """
+    Passe un Epic à 'Done' si toutes ses Stories sont 'Done'.
+
+    Epic actif par défaut (ou `epic_id`). Idempotent : un Epic déjà Done est un no-op.
+    Refuse si des Stories ne sont pas Done.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["state"]):
+        return "Error: Project not initialized."
+    with open(paths["state"], "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    eid = epic_id or state_data.get("active_epic_id")
+    if not eid:
+        return "Error: no target epic (pass epic_id or activate one)."
+    epic_file = os.path.join(get_epic_dir(root, eid), "epic.json")
+    if not os.path.exists(epic_file):
+        return f"Error: epic '{eid}' not found."
+    with open(epic_file, "r", encoding="utf-8") as f:
+        epic = json.load(f)
+    if epic.get("status") == "Done":
+        return f"Epic '{eid}' déjà Done (idempotent)."
+    story_ids = epic.get("stories", [])
+    if not story_ids:
+        return f"Error: epic '{eid}' n'a aucune Story — rien à clôturer."
+    not_done = []
+    for sid in story_ids:
+        sp = get_story_paths(root, eid, sid)
+        st = None
+        if os.path.exists(sp["story"]):
+            with open(sp["story"], "r", encoding="utf-8") as f:
+                st = json.load(f).get("status")
+        if st != "Done":
+            not_done.append(sid)
+    if not_done:
+        return f"Error: epic '{eid}' a {len(not_done)} story(ies) non Done : {', '.join(not_done)}."
+    epic["status"] = "Done"
+    with open(epic_file, "w", encoding="utf-8") as f:
+        json.dump(epic, f, indent=2, ensure_ascii=False)
+    return f"Epic '{eid}' clôturé (Done)."
+
+
 @mcp.tool()
 def effortless_status() -> str:
     """

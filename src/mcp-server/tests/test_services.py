@@ -2160,3 +2160,78 @@ def test_outbox_purge_rejects_bad_input(monkeypatch):
         server.effortless_init("P", "d")
         assert "invalide" in server.effortless_tracker_outbox_purge("{bad")
         assert "entiers" in server.effortless_tracker_outbox_purge('["x"]')
+
+
+# --- Cycle de vie Epic/Story (epic_start / story_complete / epic_complete) — STO-CADRAGE-01
+
+def _state(tmpdir):
+    with open(os.path.join(tmpdir, ".effortless", "state.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_epic_start_creates_and_activates(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        out = server.effortless_epic_start("BILLING", "Facturation")
+        assert "EPIC-BILLING créé" in out
+        epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "epic.json")
+        assert os.path.exists(epic_file)
+        with open(epic_file, encoding="utf-8") as f:
+            e = json.load(f)
+        assert e["zone"] == "BILLING" and e["status"] == "Open" and e["stories"] == []
+        st = _state(tmpdir)
+        assert st["active_epic_id"] == "EPIC-BILLING" and st["active_story_id"] is None
+        # Idempotent : pas d'écrasement.
+        assert "existe déjà" in server.effortless_epic_start("BILLING", "Autre")
+
+
+def test_epic_start_guards(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "zone requise" in server.effortless_epic_start("  ", "T")
+        assert "title requis" in server.effortless_epic_start("Z", "  ")
+
+
+def test_story_complete_requires_all_tasks_done(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_epic_start("BILLING", "Facturation")
+        server.effortless_story_start("Story 1")
+        server.effortless_task_add("T1")
+        # Tâche Todo → refus.
+        out = server.effortless_story_complete()
+        assert "non Done" in out and "TSK-01" in out
+        server.effortless_task_update("TSK-01", "Done")
+        assert "clôturée" in server.effortless_story_complete()
+        # Idempotent.
+        assert "déjà Done" in server.effortless_story_complete()
+        st = _state(tmpdir)
+        sp = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "stories",
+                          st["active_story_id"], "story.json")
+        with open(sp, encoding="utf-8") as f:
+            assert json.load(f)["status"] == "Done"
+
+
+def test_epic_complete_requires_all_stories_done(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_epic_start("BILLING", "Facturation")
+        server.effortless_story_start("Story 1")
+        # Story active Doing → epic_complete refuse.
+        out = server.effortless_epic_complete()
+        assert "non Done" in out
+        # Clôture la story (sans tâches → 0 pending), puis l'Epic.
+        assert "clôturée" in server.effortless_story_complete()
+        assert "clôturé" in server.effortless_epic_complete()
+        assert "déjà Done" in server.effortless_epic_complete()
+        epic_file = os.path.join(tmpdir, ".effortless", "epics", "EPIC-BILLING", "epic.json")
+        with open(epic_file, encoding="utf-8") as f:
+            assert json.load(f)["status"] == "Done"
