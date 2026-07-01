@@ -18,6 +18,9 @@ class WorkflowConfig(BaseModel):
 class SettingsConfig(BaseModel):
     storage_dir: str = ".effortless"
     documents_dir: str = "cadrage/Phase-001"
+    # Mode d'initialisation (005-Story-Cadrage) : "agile" (greenfield OPALE) ou
+    # "v-cycle" (repris de Jira, cycle en V). Détermine le workflow de phases.
+    init_mode: str = "agile"
 
 class EffortlessConfig(BaseModel):
     project: ProjectMeta

@@ -258,16 +258,29 @@ def story_scoped_required_docs(root: str, phase_cfg: Optional[Dict[str, Any]]) -
 def effortless_init(
     project_name: Optional[str] = None,
     description: Optional[str] = None,
-    force: bool = False
+    force: bool = False,
+    mode: str = "agile",
 ) -> str:
     """
     Initialise la configuration Effortless et les répertoires de base dans le dépôt.
+
+    `mode` (005-Story-Cadrage) sélectionne le workflow de phases :
+      - "agile" (défaut) : projet greenfield, cycle OPALE (O/P/A/L).
+      - "v-cycle" : projet repris de Jira (read-mostly), cycle en V
+        (Besoins/Spécifications/Conception/Réalisation/Vérification). Alias tolérés :
+        "cycle-en-v", "vcycle", "jira".
     """
     root = get_project_root()
     paths = get_paths(root)
-    
+
     if os.path.exists(paths["config"]) and not force:
         return "Error: An effortless.json file already exists. Use force=True to overwrite."
+
+    from effortless_mcp.services.init_modes import build_workflow, normalize_mode
+    try:
+        resolved_mode = normalize_mode(mode)
+    except ValueError as e:
+        return f"Error: {e}."
 
     # Nom de projet par défaut
     name = project_name or os.path.basename(os.path.abspath(root))
@@ -276,52 +289,14 @@ def effortless_init(
     # d'état) : un projet fraîchement initialisé a la même forme qu'un projet migré.
     docs_root = "cadrage/EPIC-PROJET/STO-PROJET-01"
 
-    # Configuration par défaut (OPAL)
+    # Workflow selon le mode (agile OPALE / v-cycle repris de Jira).
     config = EffortlessConfig(
         project=ProjectMeta(name=name, description=description, version="0.1.0"),
-        workflow=WorkflowConfig(
-            phases=[
-                PhaseConfig(
-                    id="O-analyse",
-                    name="Observer",
-                    description="Analyse de l'existant, glossaire métier et cartographie technique",
-                    required_documents=[
-                        f"{docs_root}/00-FNC-GLO-glossaire.md",
-                        f"{docs_root}/01-TEC-ANA-analyse.md",
-                        f"{docs_root}/02-BQO-questions.md"
-                    ]
-                ),
-                PhaseConfig(
-                    id="P-cadrage",
-                    name="Positionner",
-                    description="Cadrage décisionnel et architecture cible",
-                    required_documents=[
-                        f"{docs_root}/03-TEC-ARC-architecture-cible.md",
-                        f"{docs_root}/04-MET-DEC-registre-decisions.md"
-                    ]
-                ),
-                PhaseConfig(
-                    id="A-specs",
-                    name="Articuler",
-                    description="Spécifications fonctionnelles et techniques détaillées",
-                    required_documents=[
-                        f"{docs_root}/05-FNC-SPE-specifications.md",
-                        f"{docs_root}/06-TEC-API-contrat-api.md"
-                    ]
-                ),
-                PhaseConfig(
-                    id="L-plan",
-                    name="Lancer",
-                    description="Plan d'implémentation et découpage en tâches",
-                    required_documents=[
-                        f"{docs_root}/07-MET-PLN-plan-action.md"
-                    ]
-                )
-            ]
-        ),
+        workflow=build_workflow(resolved_mode, docs_root),
         settings=SettingsConfig(
             storage_dir=".effortless",
-            documents_dir=docs_root
+            documents_dir=docs_root,
+            init_mode=resolved_mode,
         )
     )
 
@@ -391,7 +366,16 @@ def effortless_init(
         phase_docs_from_workflow(config.model_dump()),
     )
 
-    return f"Project '{name}' successfully initialized under {root}."
+    phase_ids = " → ".join(p.id for p in config.workflow.phases)
+    if resolved_mode == "v-cycle":
+        hint = (
+            f" Mode v-cycle (repris de Jira) : phases {phase_ids}. "
+            f"Prochaine étape : coupler le tracker (effortless_tracker_couple) puis "
+            f"importer le backlog médié (effortless_tracker_import_plan) — read-mostly."
+        )
+    else:
+        hint = f" Mode agile (greenfield) : phases {phase_ids}."
+    return f"Project '{name}' successfully initialized under {root}.{hint}"
 
 @mcp.tool()
 def effortless_story_start(

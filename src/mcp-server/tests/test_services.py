@@ -2502,3 +2502,58 @@ def test_cadrage_docs_scaffold_backfills_active_story(monkeypatch, tmp_path):
     assert "00-FNC-GLO-glossaire" in out and os.path.exists(glo)
     # Idempotent : second appel = no-op.
     assert "no-op" in server.effortless_cadrage_docs_scaffold()
+
+
+def test_init_modes_normalize_and_aliases():
+    from effortless_mcp.services.init_modes import normalize_mode, AGILE, VCYCLE
+    assert normalize_mode("agile") == AGILE
+    assert normalize_mode("opale") == AGILE
+    assert normalize_mode("") == AGILE
+    assert normalize_mode("cycle-en-v") == VCYCLE
+    assert normalize_mode("Jira") == VCYCLE
+    with pytest.raises(ValueError):
+        normalize_mode("waterfall")
+
+
+def test_build_workflow_phases_per_mode():
+    from effortless_mcp.services.init_modes import build_workflow
+    agile = build_workflow("agile", "cadrage/E/S")
+    assert [p.id for p in agile.phases] == ["O-analyse", "P-cadrage", "A-specs", "L-plan"]
+    v = build_workflow("v-cycle", "cadrage/E/S")
+    assert [p.id for p in v.phases] == [
+        "B-besoins", "S-specifications", "C-conception", "R-realisation", "V-verification"]
+    # Docs préfixés par le docs_root.
+    assert v.phases[0].required_documents[0] == "cadrage/E/S/00-FNC-BES-besoins.md"
+
+
+def test_init_agile_is_default(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    cfg = json.load(open(os.path.join(str(tmp_path), "effortless.json"), encoding="utf-8"))
+    assert cfg["settings"]["init_mode"] == "agile"
+    assert [p["id"] for p in cfg["workflow"]["phases"]][0] == "O-analyse"
+
+
+def test_init_vcycle_mode(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    out = server.effortless_init("P", "d", mode="cycle-en-v")
+    assert "v-cycle" in out and "import" in out
+    cfg = json.load(open(os.path.join(str(tmp_path), "effortless.json"), encoding="utf-8"))
+    assert cfg["settings"]["init_mode"] == "v-cycle"
+    pids = [p["id"] for p in cfg["workflow"]["phases"]]
+    assert pids == ["B-besoins", "S-specifications", "C-conception", "R-realisation", "V-verification"]
+    # Docs v-cycle scaffoldés Obsidian-ready avec frontmatter.
+    bes = os.path.join(str(tmp_path), "cadrage", "EPIC-PROJET", "STO-PROJET-01", "00-FNC-BES-besoins.md")
+    assert os.path.exists(bes)
+    with open(bes, encoding="utf-8") as f:
+        assert "code: FNC-BES" in f.read()
+
+
+def test_init_rejects_unknown_mode(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    out = server.effortless_init("P", "d", mode="waterfall")
+    assert out.startswith("Error:")
+    assert not os.path.exists(os.path.join(str(tmp_path), "effortless.json"))
