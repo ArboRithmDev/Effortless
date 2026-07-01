@@ -69,6 +69,24 @@ class SyncJournal:
         return entry
 
     # --- rejeu -----------------------------------------------------------
+    def mark_played(self, seqs: Optional[List[int]] = None) -> int:
+        """Marque des ops en attente comme jouées, sans les exécuter.
+
+        `seqs` cible des `seq` précis (l'agent médié a flushé exactement ceux-là via
+        Rovo) ; `None` marque toutes les ops en attente. Sert aux ops sans refs à
+        persister (transition, log_work) que `ack` (refs de scaffold) ne couvre pas.
+        Idempotent : une op déjà jouée est ignorée. Retourne le nombre marqué."""
+        target = None if seqs is None else set(seqs)
+        marked = 0
+        for entry in self.pending():
+            if target is not None and entry.get("seq") not in target:
+                continue
+            entry["played"] = True
+            entry["played_at"] = self._now()
+            self._write(entry)
+            marked += 1
+        return marked
+
     def replay(self, apply_fn: Callable[[dict], None]) -> int:
         """Rejoue les migrations en attente par `seq` croissant.
 

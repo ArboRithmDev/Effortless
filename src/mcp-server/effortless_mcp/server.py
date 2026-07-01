@@ -1518,6 +1518,62 @@ def effortless_tracker_pending() -> str:
 
 
 @mcp.tool()
+def effortless_tracker_transitions_ack(transitions_json: str) -> str:
+    """
+    Persiste la table de transitions médiée (statut local → id transition Jira) dans
+    settings.tracker.transitions.
+
+    Fournie par l'agent après `getTransitionsForJiraIssue` sur une issue témoin
+    (projection médiée, STO-TRACKER-05). Permet à QueueTracker de stamper le
+    `transition_id` autoritaire sur chaque op de transition — requis par
+    transitionJiraIssue côté Rovo. Statuts locaux : Todo/Doing/Done (cycle en V).
+    Ex. : `{"Todo":"11","Doing":"5","Done":"9"}`.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    try:
+        trans = json.loads(transitions_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        return f"Error: transitions_json invalide ({e})."
+    if not isinstance(trans, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in trans.items()):
+        return "Error: transitions doit être un objet {statut_local: transition_id} (chaînes)."
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    config_data.setdefault("settings", {}).setdefault("tracker", {})["transitions"] = trans
+    with open(paths["config"], "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    return f"Transitions médiées persistées : {trans}."
+
+
+@mcp.tool()
+def effortless_tracker_flush_ack(seqs_json: str = "") -> str:
+    """
+    Marque des opérations outbox comme jouées après leur flush par l'agent (Rovo).
+
+    Pour les ops sans nouvelles refs à persister (transition, log_work) que
+    `effortless_tracker_ack` (refs de scaffold) ne couvre pas. `seqs_json` = JSON
+    d'une liste de `seq` (ceux exécutés) ; vide ou `[]` → marque toutes les ops en
+    attente. Idempotent : une op déjà jouée est ignorée.
+    """
+    root = get_project_root()
+    from effortless_mcp.ports import SyncJournal
+    seqs = None
+    s = (seqs_json or "").strip()
+    if s:
+        try:
+            parsed = json.loads(s)
+        except (json.JSONDecodeError, TypeError) as e:
+            return f"Error: seqs_json invalide ({e})."
+        if not isinstance(parsed, list) or not all(isinstance(x, int) for x in parsed):
+            return "Error: seqs_json doit être une liste d'entiers (seq)."
+        seqs = parsed
+    n = SyncJournal(root).mark_played(seqs)
+    return f"Flush ack : {n} op(s) outbox marquée(s) jouée(s)."
+
+
+@mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """
     Initialise une session de développement itératif autonome avec un objectif global spécifié.

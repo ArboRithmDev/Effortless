@@ -1681,3 +1681,123 @@ def test_discover_ack_rejects_bad_input(monkeypatch):
         server.effortless_init("P", "d")
         assert "invalide" in server.effortless_tracker_discover_ack("{bad")
         assert "level" in server.effortless_tracker_discover_ack('{"epic": 10000}')
+
+
+# --- Transition médiée (cycle en V) — STO-TRACKER-05 --------------------------
+
+def test_queue_tracker_transition_enqueues_with_id(tmp_path):
+    from effortless_mcp.ports import SyncJournal, TrackerRef
+    from effortless_mcp.ports.adapters.jira import QueueTracker
+    j = SyncJournal(str(tmp_path))
+    qt = QueueTracker(j, transitions={"Todo": "11", "Doing": "5", "Done": "9"})
+    qt.transition(TrackerRef("EFL-42", "u/EFL-42"), "Done")
+    op = j.pending()[0]
+    assert op["op"] == "transition"
+    assert op["args"] == {"tracker_id": "EFL-42", "status": "Done", "transition_id": "9"}
+
+
+def test_queue_tracker_transition_id_null_without_table(tmp_path):
+    from effortless_mcp.ports import SyncJournal, TrackerRef
+    from effortless_mcp.ports.adapters.jira import QueueTracker
+    j = SyncJournal(str(tmp_path))
+    QueueTracker(j).transition(TrackerRef("local:3", ""), "Doing")
+    # Sans table ackée -> transition_id None (fallback agent), pas d'échec.
+    op = j.pending()[0]["args"]
+    assert op["transition_id"] is None and op["tracker_id"] == "local:3" and op["status"] == "Doing"
+
+
+def test_build_queue_tracker_wires_transitions(tmp_path):
+    from effortless_mcp.ports import resolve_tracker, SyncJournal, TrackerRef
+    tracker = resolve_tracker(
+        {"tracker": {"type": "jira", "project_id": "EFL", "transitions": {"Done": "9"}}},
+        root=str(tmp_path),
+    )
+    tracker.transition(TrackerRef("EFL-1", "u"), "Done")
+    assert SyncJournal(str(tmp_path)).pending()[0]["args"]["transition_id"] == "9"
+
+
+def test_sync_journal_mark_played_by_seq(tmp_path):
+    from effortless_mcp.ports import SyncJournal
+    j = SyncJournal(str(tmp_path), now=lambda: "T")
+    j.enqueue("create", {"a": 1})       # seq 1
+    j.enqueue("transition", {"b": 2})   # seq 2
+    j.enqueue("transition", {"c": 3})   # seq 3
+    # Cible seq 2 uniquement.
+    assert j.mark_played([2]) == 1
+    remaining = [e["seq"] for e in j.pending()]
+    assert remaining == [1, 3]
+    # Idempotent : re-marquer seq 2 ne fait rien.
+    assert j.mark_played([2]) == 0
+    # None -> marque tout le reste.
+    assert j.mark_played() == 2
+    assert j.pending() == []
+
+
+def test_transition_projected_via_integration(tmp_path):
+    from effortless_mcp.ports import register_adapter, SyncJournal
+    from effortless_mcp.ports.adapters.jira import build_queue_tracker
+    from effortless_mcp.ports.integration import project_task_transitioned
+    register_adapter("jira", build_queue_tracker)
+    cfg = os.path.join(str(tmp_path), "effortless.json")
+    with open(cfg, "w", encoding="utf-8") as f:
+        json.dump({"settings": {"tracker": {"type": "jira", "project_id": "EFL",
+                                            "transitions": {"Done": "9"}}}}, f)
+    task = {"id": "TSK-01", "tracker_id": "EFL-7", "tracker_url": "u/EFL-7"}
+    project_task_transitioned(str(tmp_path), task, "Done")
+    op = SyncJournal(str(tmp_path)).pending()[0]["args"]
+    assert op["tracker_id"] == "EFL-7" and op["status"] == "Done" and op["transition_id"] == "9"
+
+
+def test_transitions_ack_persists_table(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        table = {"Todo": "11", "Doing": "5", "Done": "9"}
+        out = server.effortless_tracker_transitions_ack(json.dumps(table))
+        assert "persistées" in out
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            assert json.load(f)["settings"]["tracker"]["transitions"] == table
+
+
+def test_transitions_ack_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_transitions_ack("{bad")
+        assert "statut_local" in server.effortless_tracker_transitions_ack('{"Done": 9}')
+
+
+def test_flush_ack_marks_transition_ops_played(monkeypatch):
+    # Flux médié transition : couple -> discover transitions -> transition (enqueue)
+    # -> pending -> flush_ack -> outbox vidé.
+    from effortless_mcp import server
+    from effortless_mcp.ports.integration import project_task_transitioned
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_tracker_transitions_ack(json.dumps({"Done": "9"}))
+
+        task = {"id": "TSK-01", "tracker_id": "EFL-7", "tracker_url": "u/EFL-7"}
+        project_task_transitioned(tmpdir, task, "Done")
+
+        pend = server.effortless_tracker_pending()
+        data = json.loads(pend.split("\n\n", 1)[1])["pending"]
+        assert len(data) == 1 and data[0]["op"] == "transition" and data[0]["transition_id"] == "9"
+        seq = data[0]["seq"]
+
+        out = server.effortless_tracker_flush_ack(json.dumps([seq]))
+        assert "1 op" in out
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_flush_ack_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_flush_ack("{bad")
+        assert "entiers" in server.effortless_tracker_flush_ack('["x"]')
