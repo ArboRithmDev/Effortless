@@ -12,3 +12,6 @@ class Story(BaseModel):
     # Identité tracker (DEC-02) — champs canoniques, vides tant que non couplé.
     tracker_id: str = ""
     tracker_url: str = ""
+    # Proposition de la Story (gate validation-proposition, EVO-010 pilier 4) :
+    # {summary, status: pending|validated|rejected, reason?}. None = aucune proposition.
+    proposal: Optional[dict] = None

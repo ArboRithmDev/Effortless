@@ -254,6 +254,41 @@ def story_scoped_required_docs(root: str, phase_cfg: Optional[Dict[str, Any]]) -
 
 # --- 1. Outils d'Initialisation & Statut ---
 
+_GITIGNORE_START = "# >>> effortless (généré — ne pas éditer à la main)"
+_GITIGNORE_END = "# <<< effortless"
+
+
+def _ensure_gitignore_block(root: str) -> None:
+    """Écrit/actualise un bloc .gitignore idempotent dans le projet cible.
+
+    Ignore l'état runtime Effortless (``.effortless/``) et la config Obsidian
+    personnelle (``cadrage/.obsidian/``) mais **jamais** ``cadrage/`` : le cadrage
+    reste versionné pour que le hook anti-dérive voie ses éditions (EVO-010).
+    Idempotent (remplace le bloc délimité s'il existe) et non destructif du reste.
+    """
+    block = "\n".join([
+        _GITIGNORE_START,
+        "# État runtime Effortless ignoré ; cadrage/ reste versionné (gate anti-dérive).",
+        ".effortless/",
+        "cadrage/.obsidian/",
+        _GITIGNORE_END,
+    ])
+    path = os.path.join(root, ".gitignore")
+    existing = ""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            existing = f.read()
+    if _GITIGNORE_START in existing and _GITIGNORE_END in existing:
+        pre = existing.split(_GITIGNORE_START)[0].rstrip("\n")
+        post = existing.split(_GITIGNORE_END, 1)[1].lstrip("\n")
+        new = (pre + ("\n\n" if pre else "") + block + "\n" + (post if post else ""))
+    else:
+        sep = "" if not existing else ("" if existing.endswith("\n") else "\n")
+        new = existing + sep + ("\n" if existing else "") + block + "\n"
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(new)
+
+
 @mcp.tool()
 def effortless_init(
     project_name: Optional[str] = None,
@@ -306,6 +341,9 @@ def effortless_init(
 
     # Création du dossier .effortless
     os.makedirs(paths["storage"], exist_ok=True)
+
+    # .gitignore cible : état runtime ignoré, cadrage/ versionné (anti-dérive, EVO-010).
+    _ensure_gitignore_block(root)
 
     # Scaffolding fractal par défaut (L-31) : Epic + Story racine pour que le projet
     # fraîchement initialisé résolve sa phase via la Story active dès le départ.
@@ -955,7 +993,19 @@ def effortless_status() -> str:
 
     status_report = f"📋 Project Status: {state_data.get('project_name')}\n"
     status_report += f"Current phase: **{phase_config.get('name')}** ({current_phase_id})\n"
-    status_report += f"Next-phase eligibility: {'✅ YES (Ready)' if is_valid else '❌ NO (Blocked)'}\n\n"
+    status_report += f"Next-phase eligibility: {'✅ YES (Ready)' if is_valid else '❌ NO (Blocked)'}\n"
+
+    # Gate validation-proposition (souple, EVO-010 pilier 4) : avertit sans bloquer.
+    _, _active_story = _load_active_story(root)
+    if _active_story is not None:
+        _prop = _active_story.get("proposal")
+        if not _prop:
+            status_report += "⚠️ Proposition non validée (aucune — effortless_proposal_add).\n"
+        elif _prop.get("status") != "validated":
+            status_report += f"⚠️ Proposition non validée (statut : {_prop.get('status')}).\n"
+        else:
+            status_report += "✅ Proposition validée.\n"
+    status_report += "\n"
 
     status_report += "🔍 Required documents checklist:\n"
     for item in checklist:
@@ -974,6 +1024,78 @@ def effortless_status() -> str:
             status_report += f"- {reason}\n"
 
     return status_report
+
+
+def _load_active_story(root: str):
+    """Retourne (story_paths, story_dict) de la Story active, ou (None, None)."""
+    paths = get_paths(root)
+    if not os.path.exists(paths["state"]):
+        return None, None
+    with open(paths["state"], "r", encoding="utf-8") as f:
+        state = json.load(f)
+    epic_id, sid = state.get("active_epic_id"), state.get("active_story_id")
+    if not epic_id or not sid:
+        return None, None
+    sp = get_story_paths(root, epic_id, sid)
+    if not os.path.exists(sp["story"]):
+        return None, None
+    with open(sp["story"], "r", encoding="utf-8") as f:
+        return sp, json.load(f)
+
+
+@mcp.tool()
+def effortless_proposal_add(summary: str) -> str:
+    """
+    Enregistre la proposition de la Story active (gate validation-proposition, EVO-010).
+
+    Statut initial 'pending' — à faire valider par l'utilisateur via
+    effortless_proposal_validate avant d'attaquer le travail. Écrase une proposition
+    existante. Gate SOUPLE : effortless_status avertit si non validée, sans rien bloquer.
+    """
+    root = get_project_root()
+    if not (summary or "").strip():
+        return "Error: summary requis."
+    sp, story = _load_active_story(root)
+    if story is None:
+        return "Error: aucune Story active."
+    story["proposal"] = {"summary": summary.strip(), "status": "pending"}
+    save_entity(sp["dir"], "story", story)
+    return (f"Proposition enregistrée (pending) pour {story['id']}. "
+            f"À valider : effortless_proposal_validate.")
+
+
+@mcp.tool()
+def effortless_proposal_validate() -> str:
+    """Valide la proposition de la Story active (statut → validated)."""
+    root = get_project_root()
+    sp, story = _load_active_story(root)
+    if story is None:
+        return "Error: aucune Story active."
+    prop = story.get("proposal")
+    if not prop:
+        return "Error: aucune proposition à valider (effortless_proposal_add d'abord)."
+    prop["status"] = "validated"
+    prop.pop("reason", None)
+    save_entity(sp["dir"], "story", story)
+    return f"Proposition validée pour {story['id']}."
+
+
+@mcp.tool()
+def effortless_proposal_reject(reason: str = "") -> str:
+    """Rejette la proposition de la Story active (statut → rejected, raison optionnelle)."""
+    root = get_project_root()
+    sp, story = _load_active_story(root)
+    if story is None:
+        return "Error: aucune Story active."
+    prop = story.get("proposal")
+    if not prop:
+        return "Error: aucune proposition à rejeter."
+    prop["status"] = "rejected"
+    if (reason or "").strip():
+        prop["reason"] = reason.strip()
+    save_entity(sp["dir"], "story", story)
+    return f"Proposition rejetée pour {story['id']}."
+
 
 @mcp.tool()
 def effortless_phase_next() -> str:

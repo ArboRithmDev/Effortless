@@ -308,11 +308,17 @@ def test_drift_check_logic(monkeypatch):
         assert not is_drifting
         assert len(mod_files) == 0
         
-        # 2. Des modifs hors de src/ -> pas de drift
-        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: ["README.md", "cadrage/test.md"])
+        # 2. Des modifs hors périmètre (racine, config Obsidian) -> pas de drift
+        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: ["README.md", "cadrage/.obsidian/app.json"])
         is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
         assert not is_drifting
-        
+
+        # 2b. Modif de cadrage (hors .obsidian) + 0 tâche Doing -> DRIFT (EVO-010).
+        monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files",
+                            lambda root: ["cadrage/004-Epic-Process/002-Story-Anti-Derive-Etendu-Travail/05-FNC-SPE-specifications.md"])
+        is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
+        assert is_drifting and len(mod_files) == 1
+
         # 3. Des modifs dans src/ mais 0 tâche active -> DRIFT !
         monkeypatch.setattr("effortless_mcp.services.drift.get_modified_git_files", lambda root: ["src/cli/main.py"])
         is_drifting, mod_files, active = check_project_drift(tmpdir, tasks_dir)
@@ -2739,3 +2745,82 @@ def test_evolution_tools_end_to_end(monkeypatch, tmp_path):
     assert "-Epic-Obsidian" in backlog_md
     evo_md = _read_text(os.path.join(str(tmp_path), "cadrage", "4-Evolutions.md"))
     assert "EVO-001" in evo_md and "-Epic-Obsidian" in evo_md
+
+
+# ---- .gitignore cible : cadrage versionné, runtime ignoré (004-Story-Anti-Derive) ----
+
+def test_gitignore_block_created_and_scoped(tmp_path):
+    from effortless_mcp.server import _ensure_gitignore_block
+    root = str(tmp_path)
+    _ensure_gitignore_block(root)
+    lines = _read_text(os.path.join(root, ".gitignore")).splitlines()
+    assert ".effortless/" in lines
+    assert "cadrage/.obsidian/" in lines
+    assert "cadrage/" not in lines            # cadrage VERSIONNÉ (jamais ignoré)
+
+
+def test_gitignore_block_idempotent(tmp_path):
+    from effortless_mcp.server import _ensure_gitignore_block, _GITIGNORE_START
+    root = str(tmp_path)
+    _ensure_gitignore_block(root)
+    _ensure_gitignore_block(root)
+    assert _read_text(os.path.join(root, ".gitignore")).count(_GITIGNORE_START) == 1
+
+
+def test_gitignore_block_preserves_existing(tmp_path):
+    from effortless_mcp.server import _ensure_gitignore_block
+    root = str(tmp_path)
+    with open(os.path.join(root, ".gitignore"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("node_modules/\n*.log\n")
+    _ensure_gitignore_block(root)
+    content = _read_text(os.path.join(root, ".gitignore"))
+    assert "node_modules/" in content and "*.log" in content and ".effortless/" in content
+
+
+def test_init_writes_gitignore(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    lines = _read_text(os.path.join(str(tmp_path), ".gitignore")).splitlines()
+    assert ".effortless/" in lines and "cadrage/" not in lines
+
+
+# ---- Gate validation-proposition (souple) — 004-Story-Gate-Validation-Proposition ----
+
+def test_proposal_lifecycle_and_status(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    # Aucune proposition → status avertit (souple).
+    assert "Proposition non validée" in server.effortless_status()
+    # add → pending (toujours averti).
+    assert "pending" in server.effortless_proposal_add("Approche : faire X puis Y")
+    assert "Proposition non validée" in server.effortless_status()
+    # validate → status OK + persisté.
+    server.effortless_proposal_validate()
+    assert "✅ Proposition validée" in server.effortless_status()
+    _, story = server._load_active_story(str(tmp_path))
+    assert story["proposal"]["status"] == "validated"
+    # reject → re-averti + raison stockée.
+    server.effortless_proposal_reject("pas convaincant")
+    assert "Proposition non validée" in server.effortless_status()
+    _, story = server._load_active_story(str(tmp_path))
+    assert story["proposal"]["status"] == "rejected" and story["proposal"]["reason"] == "pas convaincant"
+
+
+def test_proposal_errors(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    assert "Error" in server.effortless_proposal_validate()   # aucune proposition
+    assert "Error" in server.effortless_proposal_add("")      # summary vide
+
+
+def test_proposal_soft_gate_does_not_block(monkeypatch, tmp_path):
+    from effortless_mcp import server
+    monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", str(tmp_path))
+    server.effortless_init("P", "d")
+    # Sans proposition validée, une tâche passe quand même en Doing (gate souple).
+    server.effortless_task_add("Tâche libre")
+    out = server.effortless_task_update("TSK-01", "Doing")
+    assert "Doing" in out and "Error" not in out

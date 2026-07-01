@@ -39,17 +39,30 @@ def get_modified_git_files(project_root: str) -> List[str]:
     except Exception:
         return []
 
+def _is_work_file(f: str) -> bool:
+    """Un fichier compte comme « travail » soumis au gate anti-dérive si c'est :
+    - du code source sous ``src/`` (.py/.js/.ts/.tsx), ou
+    - un document de cadrage sous ``cadrage/`` HORS ``cadrage/.obsidian/`` (config
+      Obsidian personnelle). Les slugs de cadrage sont ASCII (nomenclature EVO-011),
+      donc git ne les met pas entre guillemets — le préfixe brut suffit.
+    """
+    if f.startswith("src/") and f.endswith((".py", ".js", ".ts", ".tsx")):
+        return True
+    if f.startswith("cadrage/") and not f.startswith("cadrage/.obsidian/"):
+        return True
+    return False
+
+
 def check_project_drift(project_root: str, tasks_dir: str) -> Tuple[bool, List[str], List[Dict[str, Any]]]:
     """
-    Vérifie si le projet dérive : des fichiers de code sous src/ sont modifiés 
-    mais aucune tâche dans tasks_dir n'est au statut 'Doing'.
+    Vérifie si le projet dérive : des fichiers de *travail* (code sous ``src/`` OU
+    cadrage sous ``cadrage/`` hors ``.obsidian``) sont modifiés mais aucune tâche dans
+    tasks_dir n'est au statut 'Doing'. Élargi au cadrage (EVO-010) : le hook ne voyait
+    que ``src/`` — la cause racine de la dérive était que ``cadrage/`` échappait au gate.
     """
-    # 1. Récupérer les fichiers modifiés sous src/
+    # 1. Récupérer les fichiers de travail modifiés (code src/ + cadrage/).
     modified_files = get_modified_git_files(project_root)
-    code_modifications = [
-        f for f in modified_files 
-        if f.startswith("src/") and (f.endswith(".py") or f.endswith(".js") or f.endswith(".ts") or f.endswith(".tsx"))
-    ]
+    code_modifications = [f for f in modified_files if _is_work_file(f)]
 
     # 2. Charger les tâches actives
     active_tasks = []

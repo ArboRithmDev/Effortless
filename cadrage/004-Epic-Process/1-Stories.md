@@ -16,4 +16,5 @@ tags:
 | Seq | Id | Titre | Statut |
 |---|---|---|---|
 | 1 | 001-Story-Dispatch-Evolutions-Moteur-Rendu | Dispatch évolutions + moteur de rendu dérivé | Done |
-| 2 | 002-Story-Anti-Derive-Etendu-Travail | Anti-dérive étendu au travail cadrage (versionner cadrage/ + gate) | Doing |
+| 2 | 002-Story-Anti-Derive-Etendu-Travail | Anti-dérive étendu au travail cadrage (versionner cadrage/ + gate) | Done |
+| 3 | 003-Story-Gate-Validation-Proposition | Gate de validation-proposition (proposer avant d'agir) | Done |
