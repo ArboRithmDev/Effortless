@@ -2086,3 +2086,57 @@ def test_reconcile_tasks_rejects_bad_input(monkeypatch):
         server.effortless_init("P", "d")
         assert "invalide" in server.effortless_tracker_reconcile_tasks("{bad")
         assert "local_id" in server.effortless_tracker_reconcile_tasks('{"local:1": {"x": 1}}')
+
+
+# --- Hygiène outbox : purge vs mark_played — STO-TRACKER-11 -------------------
+
+def test_sync_journal_purge_removes_pending_by_seq(tmp_path):
+    from effortless_mcp.ports import SyncJournal
+    j = SyncJournal(str(tmp_path), now=lambda: "T")
+    j.enqueue("create", {"a": 1})       # seq 1
+    j.enqueue("transition", {"b": 2})   # seq 2
+    j.enqueue("log_work", {"c": 3})     # seq 3
+    assert j.purge([2]) == 1
+    assert [e["seq"] for e in j.pending()] == [1, 3]
+    # Purge idempotente (seq 2 déjà supprimé).
+    assert j.purge([2]) == 0
+    # None -> purge tout le reste.
+    assert j.purge() == 2
+    assert j.pending() == []
+
+
+def test_sync_journal_purge_preserves_played(tmp_path):
+    from effortless_mcp.ports import SyncJournal
+    j = SyncJournal(str(tmp_path), now=lambda: "T")
+    j.enqueue("create", {"a": 1})       # seq 1
+    j.enqueue("transition", {"b": 2})   # seq 2
+    j.mark_played([1])                  # seq 1 joué (audit)
+    # purge ne touche QUE les ops en attente : seq 1 (joué) survit.
+    assert j.purge() == 1               # seul seq 2 (pending) détruit
+    c = j.counts()
+    assert c == {"pending": 0, "played": 1, "total": 1}
+
+
+def test_outbox_status_and_purge_tools(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_task_add("T1")
+        server.effortless_task_add("T2")
+        status = server.effortless_tracker_outbox_status()
+        assert "2 en attente" in status
+        out = server.effortless_tracker_outbox_purge("")
+        assert "2 op" in out
+        assert "0 en attente" in server.effortless_tracker_outbox_status()
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_outbox_purge_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_outbox_purge("{bad")
+        assert "entiers" in server.effortless_tracker_outbox_purge('["x"]')

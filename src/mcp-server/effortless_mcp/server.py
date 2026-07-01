@@ -1574,6 +1574,46 @@ def effortless_tracker_flush_ack(seqs_json: str = "") -> str:
 
 
 @mcp.tool()
+def effortless_tracker_outbox_status() -> str:
+    """
+    Décompte l'outbox de synchronisation : ops en attente / jouées / total.
+
+    Hygiène (STO-TRACKER-11) : révèle une accumulation d'ops non flushées (ex. projet
+    dogfood couplé où task_add/task_update enqueue sans jamais flusher vers le tracker).
+    """
+    root = get_project_root()
+    from effortless_mcp.ports import SyncJournal
+    c = SyncJournal(root).counts()
+    return f"Outbox : {c['pending']} en attente · {c['played']} jouée(s) · {c['total']} total."
+
+
+@mcp.tool()
+def effortless_tracker_outbox_purge(seqs_json: str = "") -> str:
+    """
+    DÉTRUIT des opérations outbox EN ATTENTE (abandon honnête), sans les exécuter.
+
+    Distinct de `flush_ack` (qui marque JOUÉ, sémantiquement « exécuté via Rovo ») :
+    `purge` supprime les fichiers d'ops erronées/obsolètes qui ne doivent jamais être
+    projetées (STO-TRACKER-11). `seqs_json` = JSON d'une liste de `seq` ; vide ou `[]`
+    → purge toutes les ops en attente. Les ops déjà jouées (audit) sont préservées.
+    """
+    root = get_project_root()
+    from effortless_mcp.ports import SyncJournal
+    seqs = None
+    s = (seqs_json or "").strip()
+    if s:
+        try:
+            parsed = json.loads(s)
+        except (json.JSONDecodeError, TypeError) as e:
+            return f"Error: seqs_json invalide ({e})."
+        if not isinstance(parsed, list) or not all(isinstance(x, int) for x in parsed):
+            return "Error: seqs_json doit être une liste d'entiers (seq)."
+        seqs = parsed
+    n = SyncJournal(root).purge(seqs)
+    return f"Outbox purge : {n} op(s) en attente détruite(s) (abandonnées, non projetées)."
+
+
+@mcp.tool()
 def effortless_tracker_log_work(task_id: str, minutes: int, comment: str = "") -> str:
     """
     Enregistre du temps passé (minutes) sur une tâche et l'enqueue pour projection Jira.

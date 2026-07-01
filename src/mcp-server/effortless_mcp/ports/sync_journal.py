@@ -45,6 +45,12 @@ class SyncJournal:
         """Migrations non encore jouées, par `seq` croissant."""
         return [e for e in self._load_all() if not e.get("played")]
 
+    def counts(self) -> dict:
+        """Décompte {pending, played, total} de l'outbox (pour l'hygiène)."""
+        entries = self._load_all()
+        played = sum(1 for e in entries if e.get("played"))
+        return {"pending": len(entries) - played, "played": played, "total": len(entries)}
+
     # --- écriture --------------------------------------------------------
     def next_seq(self) -> int:
         """Prochain `seq` qui sera attribué par `enqueue` (max existant + 1).
@@ -93,6 +99,25 @@ class SyncJournal:
             self._write(entry)
             marked += 1
         return marked
+
+    def purge(self, seqs: Optional[List[int]] = None) -> int:
+        """DÉTRUIT (supprime les fichiers) des ops EN ATTENTE, sans les exécuter.
+
+        `seqs` cible des `seq` précis ; `None` purge toutes les ops en attente. Contrairement
+        à `mark_played` (qui prétend l'op jouée via Rovo), `purge` abandonne honnêtement des
+        enqueues erronés/obsolètes : ils disparaissent de l'outbox. Les ops déjà JOUÉES sont
+        préservées (trace d'audit). Retourne le nombre supprimé."""
+        target = None if seqs is None else set(seqs)
+        removed = 0
+        for entry in self.pending():
+            if target is not None and entry.get("seq") not in target:
+                continue
+            try:
+                os.remove(self._path(entry["seq"]))
+                removed += 1
+            except OSError:
+                pass
+        return removed
 
     def replay(self, apply_fn: Callable[[dict], None]) -> int:
         """Rejoue les migrations en attente par `seq` croissant.
