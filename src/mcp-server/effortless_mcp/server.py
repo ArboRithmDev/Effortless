@@ -1683,6 +1683,76 @@ def effortless_tracker_import_ack(zone: str, tree_json: str) -> str:
 
 
 @mcp.tool()
+def effortless_tracker_xray_discover_ack(xray_json: str) -> str:
+    """
+    Persiste la taxonomie Xray médiée dans settings.tracker.xray.
+
+    Xray est un add-on Jira hors modèle fractal (STO-TRACKER-08). `xray_json` fournit
+    l'id de type d'issue Test et le nom du type de lien Story↔Test, découverts par
+    l'agent (getJiraProjectIssueTypesMetadata + getIssueLinkTypes via Rovo).
+    Ex. : `{"test_issue_type_id":"10201","link_type":"Test"}`. `link_type` optionnel.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    try:
+        xr = json.loads(xray_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        return f"Error: xray_json invalide ({e})."
+    if not isinstance(xr, dict) or not xr.get("test_issue_type_id"):
+        return "Error: xray doit être un objet avec au minimum test_issue_type_id (chaîne)."
+    if not all(isinstance(v, str) for v in xr.values()):
+        return "Error: toutes les valeurs xray doivent être des chaînes."
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    config_data.setdefault("settings", {}).setdefault("tracker", {})["xray"] = xr
+    with open(paths["config"], "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    return f"Taxonomie Xray persistée : {xr}."
+
+
+@mcp.tool()
+def effortless_tracker_xray_add_test(title: str, link_tracker_id: str = "", test_type: str = "Manual") -> str:
+    """
+    Enqueue la création d'un Test Xray (médié), optionnellement lié à une Story/Task.
+
+    Projection auxiliaire médiée (STO-TRACKER-08), hors modèle fractal. Enqueue une op
+    « xray_create_test » ; l'agent (Rovo) crée l'issue via createJiraIssue (type Test,
+    issue_type_id depuis settings.tracker.xray) puis, si `link_tracker_id` fourni, lie
+    via createIssueLink (link_type), puis effortless_tracker_flush_ack. Sans couplage : no-op.
+    """
+    root = get_project_root()
+    paths = get_paths(root)
+    if not os.path.exists(paths["config"]):
+        return "Error: Project not initialized."
+    if not (title or "").strip():
+        return "Error: title requis."
+
+    from effortless_mcp.ports import ROVO_DISCLAIMER, NullTracker, resolve_tracker, SyncJournal
+    with open(paths["config"], "r", encoding="utf-8") as f:
+        settings = (json.load(f).get("settings") or {})
+    if isinstance(resolve_tracker(settings, root), NullTracker):
+        return "Projet non couplé : Test Xray non projeté (no-op)."
+
+    xr = (settings.get("tracker") or {}).get("xray") or {}
+    SyncJournal(root).enqueue("xray_create_test", {
+        "title": title,
+        "issue_type_name": "Test",
+        "issue_type_id": xr.get("test_issue_type_id"),  # None si discover Xray non fait
+        "link_tracker_id": link_tracker_id or None,
+        "link_type": xr.get("link_type") or "Test",
+        "test_type": test_type,
+    })
+    linked = f" lié à {link_tracker_id}" if link_tracker_id else ""
+    return (
+        f"{ROVO_DISCLAIMER}\n\n"
+        f"Test Xray '{title}'{linked} planifié. Exécute via effortless_tracker_pending "
+        f"(Rovo createJiraIssue Test + createIssueLink), puis effortless_tracker_flush_ack."
+    )
+
+
+@mcp.tool()
 def effortless_loop_init(goal: str) -> str:
     """
     Initialise une session de développement itératif autonome avec un objectif global spécifié.

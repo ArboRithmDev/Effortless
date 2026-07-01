@@ -1938,3 +1938,79 @@ def test_import_ack_rejects_bad_input(monkeypatch):
         # Nœud sans tracker_id rejeté.
         assert "tracker_id" in server.effortless_tracker_import_ack(
             "PROJET", '{"tree": [{"title": "x"}]}')
+
+
+# --- Option Xray (MVP médié) — STO-TRACKER-08 ---------------------------------
+
+def test_xray_discover_ack_persists(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        xr = {"test_issue_type_id": "10201", "link_type": "Test"}
+        out = server.effortless_tracker_xray_discover_ack(json.dumps(xr))
+        assert "persistée" in out
+        with open(os.path.join(tmpdir, "effortless.json"), encoding="utf-8") as f:
+            assert json.load(f)["settings"]["tracker"]["xray"] == xr
+
+
+def test_xray_discover_ack_rejects_bad_input(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        assert "invalide" in server.effortless_tracker_xray_discover_ack("{bad")
+        assert "test_issue_type_id" in server.effortless_tracker_xray_discover_ack('{"link_type": "Test"}')
+
+
+def test_xray_add_test_enqueues_with_id_and_link(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_tracker_xray_discover_ack(
+            json.dumps({"test_issue_type_id": "10201", "link_type": "Test"}))
+        out = server.effortless_tracker_xray_add_test("Login OK", link_tracker_id="EFL-5")
+        assert "Xray" in out and "EFL-5" in out
+        data = json.loads(server.effortless_tracker_pending().split("\n\n", 1)[1])["pending"]
+        op = next(o for o in data if o["op"] == "xray_create_test")
+        assert op["title"] == "Login OK"
+        assert op["issue_type_id"] == "10201" and op["issue_type_name"] == "Test"
+        assert op["link_tracker_id"] == "EFL-5" and op["link_type"] == "Test"
+
+
+def test_xray_add_test_id_null_without_discover(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_tracker_xray_add_test("T")
+        op = json.loads(server.effortless_tracker_pending().split("\n\n", 1)[1])["pending"][0]
+        # Sans discover Xray : id None (fallback nom), link_type défaut "Test", pas de lien.
+        assert op["issue_type_id"] is None and op["link_type"] == "Test"
+        assert op["link_tracker_id"] is None
+
+
+def test_xray_add_test_flow_flush_ack(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        server.effortless_tracker_xray_add_test("T", link_tracker_id="EFL-5")
+        server.effortless_tracker_flush_ack("")
+        assert "Aucune opération" in server.effortless_tracker_pending()
+
+
+def test_xray_add_test_guards(monkeypatch):
+    from effortless_mcp import server
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("EFFORTLESS_PROJECT_ROOT", tmpdir)
+        server.effortless_init("P", "d")
+        # Non couplé : no-op.
+        assert "no-op" in server.effortless_tracker_xray_add_test("T")
+        server.effortless_tracker_couple("jira", "EFL", "https://x/EFL")
+        assert "title requis" in server.effortless_tracker_xray_add_test("  ")
